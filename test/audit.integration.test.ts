@@ -78,4 +78,58 @@ describe('runAudit with mocked WordPress API', () => {
     expect(d.filenameCandidates[0]).toMatchObject({ baseName: 'x.jpg', hashEvidence: 'all-identical' });
     expect(d.exactDuplicates[0]!.files[0]!.references).toEqual([{ type: 'post', id: 1, url: 'https://example.com/a/', title: 'A' }]);
   });
+
+  const healthSite = {
+    posts: [
+      { id: 1, link: 'https://example.com/a/', title: 'A', content: '<img src="/u/x.jpg"><img src="/blank.gif" data-src="/u/lazy.jpg"><img src="https://cdn.example.net/c.jpg"><img src="https://old.example.org/o.jpg">' },
+      { id: 2, link: 'https://example.com/b/', title: 'B', content: '<img src="/u/missing.jpg"><img src="https://old.example.org/o.jpg">' },
+    ],
+  };
+  const healthFiles = {
+    'https://example.com/u/x.jpg': { body: fakeImage('x') },
+    'https://example.com/u/lazy.jpg': { body: fakeImage('x') },
+    'https://cdn.example.net/c.jpg': { body: fakeImage('c'), head: { status: 405 } },
+    'https://old.example.org/o.jpg': { status: 403 },
+  };
+
+  it('checks media health with HEAD only, never downloading bodies', async () => {
+    const log: string[] = [];
+    const read: string[] = [];
+    const inv = await runAudit('https://example.com', {
+      fetch: mockFetch(healthSite), stream: mockStream(healthFiles, log, read), health: true, allowedDomains: ['cdn.example.net'], now,
+    });
+    expect(inv).not.toHaveProperty('duplicates');
+    const h = inv.mediaHealth!;
+    expect(h.inspection).toEqual({ mode: 'head', attempted: 5, getFallbacks: 3 });
+    expect(read).toEqual([]);
+    expect(Object.fromEntries(h.images.map((i) => [i.url.split('/').pop(), i.status]))).toEqual({
+      'c.jpg': 'healthy', 'o.jpg': 'inaccessible', 'lazy.jpg': 'healthy', 'missing.jpg': 'missing', 'x.jpg': 'healthy',
+    });
+    expect(h.domains.map((d) => [d.hostname, d.classification])).toEqual([['old.example.org', 'external'], ['cdn.example.net', 'allowed'], ['example.com', 'internal']]);
+    expect(h.domains[0]).toMatchObject({ affectedPosts: 2, health: { inaccessible: 1 } });
+    expect(h.summary).toMatchObject({ affectedPosts: 2, affectedPages: 0, externalDependencyDomains: 1 });
+    expect(inv.images.some((i) => i.filename === 'blank.gif')).toBe(false);
+  });
+
+  it('shares one download per URL between --health and --duplicates', async () => {
+    const log: string[] = [];
+    const read: string[] = [];
+    const inv = await runAudit('https://example.com', {
+      fetch: mockFetch(healthSite), stream: mockStream(healthFiles, log, read), health: true, duplicates: true, now,
+    });
+    expect(log).toHaveLength(5);
+    expect(new Set(log).size).toBe(5);
+    expect(log.some((l) => l.startsWith('HEAD'))).toBe(false);
+    expect(inv.mediaHealth!.inspection).toEqual({ mode: 'download', attempted: 5, getFallbacks: 0 });
+    expect(inv.mediaHealth!.summary.byStatus).toMatchObject({ healthy: 3, missing: 1, inaccessible: 1 });
+    expect(inv.duplicates!.exactDuplicates[0]!.files.map((f) => f.filename)).toEqual(['lazy.jpg', 'x.jpg']);
+    expect(inv.duplicates!.inspection).toMatchObject({ attempted: 5, inspected: 3, failed: 2 });
+  });
+
+  it('rejects unsafe allowed-domain entries before any request', async () => {
+    const log: string[] = [];
+    await expect(runAudit('https://example.com', { fetch: mockFetch(healthSite, log), health: true, allowedDomains: ['https://cdn.example.net/'] }))
+      .rejects.toThrow(/Invalid allowed domain/);
+    expect(log).toEqual([]);
+  });
 });

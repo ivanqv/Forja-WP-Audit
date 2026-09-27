@@ -5,8 +5,8 @@
   "stats": {
     "postsAnalyzed": 2,
     "pagesAnalyzed": 1,
-    "totalImageReferences": 9,
-    "uniqueImageUrls": 9
+    "totalImageReferences": 12,
+    "uniqueImageUrls": 12
   },
   "images": [
     {
@@ -112,6 +112,23 @@
       ]
     },
     {
+      "url": "https://example.com/wp-content/uploads/2025/03/office.jpg",
+      "filename": "office.jpg",
+      "hostname": "example.com",
+      "referenceCount": 1,
+      "sources": [
+        "data-src"
+      ],
+      "references": [
+        {
+          "type": "page",
+          "id": 2,
+          "url": "https://example.com/about/",
+          "title": "About"
+        }
+      ]
+    },
+    {
       "url": "https://example.com/wp-content/uploads/2025/03/team-final.webp",
       "filename": "team-final.webp",
       "hostname": "example.com",
@@ -146,6 +163,40 @@
       ]
     },
     {
+      "url": "https://images.partner.example/badge.png",
+      "filename": "badge.png",
+      "hostname": "images.partner.example",
+      "referenceCount": 1,
+      "sources": [
+        "img-src"
+      ],
+      "references": [
+        {
+          "type": "page",
+          "id": 2,
+          "url": "https://example.com/about/",
+          "title": "About"
+        }
+      ]
+    },
+    {
+      "url": "https://old-domain.example.org/wp-content/uploads/2019/logo.png",
+      "filename": "logo.png",
+      "hostname": "old-domain.example.org",
+      "referenceCount": 1,
+      "sources": [
+        "img-src"
+      ],
+      "references": [
+        {
+          "type": "post",
+          "id": 15,
+          "url": "https://example.com/migration-notes/",
+          "title": "Migration notes"
+        }
+      ]
+    },
+    {
       "url": "https://staging.example.net/wp-content/uploads/diagram.png",
       "filename": "diagram.png",
       "hostname": "staging.example.net",
@@ -166,11 +217,21 @@
   "domains": [
     {
       "hostname": "example.com",
-      "uniqueImageUrls": 7,
-      "imageReferences": 7
+      "uniqueImageUrls": 8,
+      "imageReferences": 8
     },
     {
       "hostname": "cdn.example.com",
+      "uniqueImageUrls": 1,
+      "imageReferences": 1
+    },
+    {
+      "hostname": "images.partner.example",
+      "uniqueImageUrls": 1,
+      "imageReferences": 1
+    },
+    {
+      "hostname": "old-domain.example.org",
       "uniqueImageUrls": 1,
       "imageReferences": 1
     },
@@ -183,12 +244,21 @@
   "warnings": [],
   "duplicates": {
     "inspection": {
-      "attempted": 9,
-      "inspected": 8,
-      "failed": 1,
-      "bytesDownloaded": 277000
+      "attempted": 12,
+      "inspected": 9,
+      "failed": 3,
+      "bytesDownloaded": 307000
     },
     "failures": [
+      {
+        "url": "https://images.partner.example/badge.png",
+        "error": "HTTP 403",
+        "httpStatus": 403
+      },
+      {
+        "url": "https://old-domain.example.org/wp-content/uploads/2019/logo.png",
+        "error": "Request failed for https://old-domain.example.org/wp-content/uploads/2019/logo.png: getaddrinfo ENOTFOUND old-domain.example.org"
+      },
       {
         "url": "https://staging.example.net/wp-content/uploads/diagram.png",
         "error": "HTTP 404",
@@ -394,5 +464,363 @@
       "basis": "downloaded-size-of-identical-files-at-distinct-paths",
       "note": "Theoretical estimate: downloaded (transfer) size of files with identical SHA-256 content served from distinct paths. It does not prove the files are stored separately and is not guaranteed recoverable disk space. Verify manually before removing anything; this tool never deletes files."
     }
+  },
+  "mediaHealth": {
+    "internalHostnames": [
+      "example.com",
+      "www.example.com"
+    ],
+    "allowedDomains": [
+      "cdn.example.com"
+    ],
+    "inspection": {
+      "mode": "download",
+      "attempted": 12,
+      "getFallbacks": 0
+    },
+    "summary": {
+      "imageUrls": 12,
+      "healthy": 9,
+      "notHealthy": 3,
+      "byStatus": {
+        "healthy": 9,
+        "missing": 1,
+        "inaccessible": 1,
+        "unreachable": 1,
+        "timeout": 0,
+        "unexpected-content": 0,
+        "uninspectable": 0,
+        "unknown": 0
+      },
+      "affectedPosts": 1,
+      "affectedPages": 1,
+      "internalUrls": 8,
+      "allowedExternalUrls": 1,
+      "externalDependencyUrls": 3,
+      "externalDependencyDomains": 3
+    },
+    "images": [
+      {
+        "url": "https://cdn.example.com/wp-content/uploads/2025/03/banner.jpg",
+        "hostname": "cdn.example.com",
+        "classification": "allowed",
+        "status": "healthy",
+        "method": "GET",
+        "httpStatus": 200,
+        "contentType": "image/jpeg",
+        "bytes": 48000,
+        "referenceCount": 1
+      },
+      {
+        "url": "https://example.com/wp-content/uploads/2025/03/banner-1.jpg",
+        "hostname": "example.com",
+        "classification": "internal",
+        "status": "healthy",
+        "method": "GET",
+        "httpStatus": 200,
+        "contentType": "image/jpeg",
+        "bytes": 48000,
+        "referenceCount": 1
+      },
+      {
+        "url": "https://example.com/wp-content/uploads/2025/03/banner-1024x576.jpg",
+        "hostname": "example.com",
+        "classification": "internal",
+        "status": "healthy",
+        "method": "GET",
+        "httpStatus": 200,
+        "contentType": "image/jpeg",
+        "bytes": 31000,
+        "referenceCount": 1
+      },
+      {
+        "url": "https://example.com/wp-content/uploads/2025/03/banner-300x169.jpg",
+        "hostname": "example.com",
+        "classification": "internal",
+        "status": "healthy",
+        "method": "GET",
+        "httpStatus": 200,
+        "contentType": "image/jpeg",
+        "bytes": 9000,
+        "referenceCount": 1
+      },
+      {
+        "url": "https://example.com/wp-content/uploads/2025/03/banner.jpg",
+        "hostname": "example.com",
+        "classification": "internal",
+        "status": "healthy",
+        "method": "GET",
+        "httpStatus": 200,
+        "contentType": "image/jpeg",
+        "bytes": 48000,
+        "referenceCount": 1
+      },
+      {
+        "url": "https://example.com/wp-content/uploads/2025/03/cover.jpg",
+        "hostname": "example.com",
+        "classification": "internal",
+        "status": "healthy",
+        "method": "GET",
+        "httpStatus": 200,
+        "contentType": "image/jpeg",
+        "bytes": 52000,
+        "referenceCount": 1
+      },
+      {
+        "url": "https://example.com/wp-content/uploads/2025/03/office.jpg",
+        "hostname": "example.com",
+        "classification": "internal",
+        "status": "healthy",
+        "method": "GET",
+        "httpStatus": 200,
+        "contentType": "image/jpeg",
+        "bytes": 30000,
+        "referenceCount": 1
+      },
+      {
+        "url": "https://example.com/wp-content/uploads/2025/03/team-final.webp",
+        "hostname": "example.com",
+        "classification": "internal",
+        "status": "healthy",
+        "method": "GET",
+        "httpStatus": 200,
+        "contentType": "image/webp",
+        "bytes": 21000,
+        "referenceCount": 1
+      },
+      {
+        "url": "https://example.com/wp-content/uploads/2025/03/team.webp",
+        "hostname": "example.com",
+        "classification": "internal",
+        "status": "healthy",
+        "method": "GET",
+        "httpStatus": 200,
+        "contentType": "image/webp",
+        "bytes": 20000,
+        "referenceCount": 1
+      },
+      {
+        "url": "https://images.partner.example/badge.png",
+        "hostname": "images.partner.example",
+        "classification": "external",
+        "status": "inaccessible",
+        "method": "GET",
+        "reason": "http-status",
+        "error": "HTTP 403",
+        "httpStatus": 403,
+        "contentType": "text/html",
+        "referenceCount": 1
+      },
+      {
+        "url": "https://old-domain.example.org/wp-content/uploads/2019/logo.png",
+        "hostname": "old-domain.example.org",
+        "classification": "external",
+        "status": "unreachable",
+        "method": "GET",
+        "reason": "dns",
+        "error": "Request failed for https://old-domain.example.org/wp-content/uploads/2019/logo.png: getaddrinfo ENOTFOUND old-domain.example.org",
+        "referenceCount": 1
+      },
+      {
+        "url": "https://staging.example.net/wp-content/uploads/diagram.png",
+        "hostname": "staging.example.net",
+        "classification": "external",
+        "status": "missing",
+        "method": "GET",
+        "reason": "http-status",
+        "error": "HTTP 404",
+        "httpStatus": 404,
+        "contentType": "text/html",
+        "referenceCount": 1
+      }
+    ],
+    "affectedContent": [
+      {
+        "type": "page",
+        "id": 2,
+        "url": "https://example.com/about/",
+        "title": "About",
+        "problems": [
+          {
+            "url": "https://images.partner.example/badge.png",
+            "status": "inaccessible",
+            "httpStatus": 403
+          }
+        ]
+      },
+      {
+        "type": "post",
+        "id": 15,
+        "url": "https://example.com/migration-notes/",
+        "title": "Migration notes",
+        "problems": [
+          {
+            "url": "https://old-domain.example.org/wp-content/uploads/2019/logo.png",
+            "status": "unreachable"
+          },
+          {
+            "url": "https://staging.example.net/wp-content/uploads/diagram.png",
+            "status": "missing",
+            "httpStatus": 404
+          }
+        ]
+      }
+    ],
+    "domains": [
+      {
+        "hostname": "images.partner.example",
+        "classification": "external",
+        "imageUrls": 1,
+        "affectedPosts": 0,
+        "affectedPages": 1,
+        "health": {
+          "healthy": 0,
+          "missing": 0,
+          "inaccessible": 1,
+          "unreachable": 0,
+          "timeout": 0,
+          "unexpected-content": 0,
+          "uninspectable": 0,
+          "unknown": 0
+        },
+        "exampleUrls": [
+          "https://images.partner.example/badge.png"
+        ],
+        "references": [
+          {
+            "type": "page",
+            "id": 2,
+            "url": "https://example.com/about/",
+            "title": "About"
+          }
+        ]
+      },
+      {
+        "hostname": "old-domain.example.org",
+        "classification": "external",
+        "imageUrls": 1,
+        "affectedPosts": 1,
+        "affectedPages": 0,
+        "health": {
+          "healthy": 0,
+          "missing": 0,
+          "inaccessible": 0,
+          "unreachable": 1,
+          "timeout": 0,
+          "unexpected-content": 0,
+          "uninspectable": 0,
+          "unknown": 0
+        },
+        "exampleUrls": [
+          "https://old-domain.example.org/wp-content/uploads/2019/logo.png"
+        ],
+        "references": [
+          {
+            "type": "post",
+            "id": 15,
+            "url": "https://example.com/migration-notes/",
+            "title": "Migration notes"
+          }
+        ]
+      },
+      {
+        "hostname": "staging.example.net",
+        "classification": "external",
+        "imageUrls": 1,
+        "affectedPosts": 1,
+        "affectedPages": 0,
+        "health": {
+          "healthy": 0,
+          "missing": 1,
+          "inaccessible": 0,
+          "unreachable": 0,
+          "timeout": 0,
+          "unexpected-content": 0,
+          "uninspectable": 0,
+          "unknown": 0
+        },
+        "exampleUrls": [
+          "https://staging.example.net/wp-content/uploads/diagram.png"
+        ],
+        "references": [
+          {
+            "type": "post",
+            "id": 15,
+            "url": "https://example.com/migration-notes/",
+            "title": "Migration notes"
+          }
+        ]
+      },
+      {
+        "hostname": "cdn.example.com",
+        "classification": "allowed",
+        "imageUrls": 1,
+        "affectedPosts": 1,
+        "affectedPages": 0,
+        "health": {
+          "healthy": 1,
+          "missing": 0,
+          "inaccessible": 0,
+          "unreachable": 0,
+          "timeout": 0,
+          "unexpected-content": 0,
+          "uninspectable": 0,
+          "unknown": 0
+        },
+        "exampleUrls": [
+          "https://cdn.example.com/wp-content/uploads/2025/03/banner.jpg"
+        ],
+        "references": [
+          {
+            "type": "post",
+            "id": 15,
+            "url": "https://example.com/migration-notes/",
+            "title": "Migration notes"
+          }
+        ]
+      },
+      {
+        "hostname": "example.com",
+        "classification": "internal",
+        "imageUrls": 8,
+        "affectedPosts": 2,
+        "affectedPages": 1,
+        "health": {
+          "healthy": 8,
+          "missing": 0,
+          "inaccessible": 0,
+          "unreachable": 0,
+          "timeout": 0,
+          "unexpected-content": 0,
+          "uninspectable": 0,
+          "unknown": 0
+        },
+        "exampleUrls": [
+          "https://example.com/wp-content/uploads/2025/03/banner-1.jpg",
+          "https://example.com/wp-content/uploads/2025/03/banner-1024x576.jpg",
+          "https://example.com/wp-content/uploads/2025/03/banner-300x169.jpg"
+        ],
+        "references": [
+          {
+            "type": "page",
+            "id": 2,
+            "url": "https://example.com/about/",
+            "title": "About"
+          },
+          {
+            "type": "post",
+            "id": 12,
+            "url": "https://example.com/hello-world/",
+            "title": "Hello world"
+          },
+          {
+            "type": "post",
+            "id": 15,
+            "url": "https://example.com/migration-notes/",
+            "title": "Migration notes"
+          }
+        ]
+      }
+    ]
   }
 }

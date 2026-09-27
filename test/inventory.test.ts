@@ -38,6 +38,19 @@ describe('buildInventory', () => {
     expect(inventory.auditedAt).toBe('2026-01-01T00:00:00.000Z');
   });
 
+  it('deduplicates lazy-loaded and plain references while keeping every discovery source', () => {
+    const inv = buildInventory({
+      siteUrl: 'https://example.com',
+      auditedAt: new Date(0),
+      items: [
+        item({ html: '<img src="/blank.gif" data-src="/u/a.jpg"><img src="/u/a.jpg"><img data-srcset="/u/a.jpg 1x">' }),
+        item({ id: 2, url: 'https://example.com/post-2/', html: '<img src="/blank.gif" data-src="/u/a.jpg">' }),
+      ],
+      featuredMedia: new Map(),
+    });
+    expect(inv.images.map((i) => [i.filename, i.sources, i.referenceCount])).toEqual([['a.jpg', ['data-src', 'data-srcset', 'img-src'], 2]]);
+  });
+
   it('distinguishes posts and pages with the same id', () => {
     const empty = buildInventory({ siteUrl: 'https://example.com', auditedAt: new Date(), items: [], featuredMedia: new Map() });
     expect(empty.stats.uniqueImageUrls).toBe(0);

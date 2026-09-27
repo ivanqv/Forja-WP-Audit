@@ -17,10 +17,12 @@ const images: Record<string, { body: Buffer; status?: number; type?: string }> =
 let server: Server;
 let siteUrl: string;
 let outDir: string;
+let headRequests = 0;
 
 beforeAll(async () => {
   server = createServer((req, res) => {
-    if (req.method !== 'GET') { res.writeHead(405).end(); return; }
+    if (req.method !== 'GET' && req.method !== 'HEAD') { res.writeHead(405).end(); return; }
+    headRequests += req.method === 'HEAD' ? 1 : 0;
     const img = images[req.url ?? ''];
     if (img) { res.writeHead(img.status ?? 200, { 'content-type': img.type ?? 'image/jpeg' }).end(img.body); return; }
     const r = handleWpRequest(
@@ -82,13 +84,30 @@ describe('cli', () => {
     expect(inv.stats.uniqueImageUrls).toBe(3);
   });
 
+  it('checks media health with --health using HEAD requests', async () => {
+    const c = capture();
+    headRequests = 0;
+    const code = await main(['audit', siteUrl, '--health', '--allowed-domains', 'cdn.example.com', '-o', outDir, '--allow-private-network'], c.io);
+    expect(code).toBe(EXIT_OK);
+    expect(c.out.join('\n')).toContain('Media health:      3/3 healthy');
+    expect(c.out.join('\n')).toContain('External image domains: none');
+    expect(headRequests).toBe(3);
+
+    const inv = JSON.parse(await readFile(join(outDir, 'inventory.json'), 'utf8')) as Inventory;
+    expect(inv).not.toHaveProperty('duplicates');
+    expect(inv.mediaHealth!.allowedDomains).toEqual(['cdn.example.com']);
+    expect(inv.mediaHealth!.domains).toMatchObject([{ hostname: '127.0.0.1', classification: 'internal', imageUrls: 3, affectedPosts: 1, affectedPages: 1 }]);
+  });
+
   it('blocks loopback targets by default', async () => {
     const c = capture();
     expect(await main(['audit', siteUrl, '--output', outDir], c.io)).toBe(EXIT_FAILURE);
     expect(c.err.join('\n')).toMatch(/private, loopback or link-local/);
   });
 
-  it.each([[[]], [['audit']], [['scan', 'https://example.com']], [['audit', 'example.com']], [['audit', 'https://example.com', '--bogus']]])(
+  it.each([[[]], [['audit']], [['scan', 'https://example.com']], [['audit', 'example.com']], [['audit', 'https://example.com', '--bogus']],
+    [['audit', 'https://example.com', '--allowed-domains', 'cdn.example.com']],
+    [['audit', 'https://example.com', '--health', '--allowed-domains', 'https://evil.example/']]])(
     'returns a usage error for %j', async (argv) => {
       expect(await main(argv, capture().io)).toBe(EXIT_USAGE);
     },

@@ -6,7 +6,7 @@ import type { ContentItem, ImageInspection } from '../src/core/types.js';
 
 const up = 'https://example.com/wp-content/uploads/2025/03/';
 const sha = (seed: string) => createHash('sha256').update(seed).digest('hex');
-const ok = (url: string, seed: string, bytes = 1000): ImageInspection => ({ url, ok: true, sha256: sha(seed), bytes, contentType: 'image/jpeg' });
+const ok = (url: string, seed: string, bytes = 1000): ImageInspection => ({ url, status: 'healthy', method: 'GET', sha256: sha(seed), bytes, contentType: 'image/jpeg' });
 
 function detect(items: { id: number; html: string }[], inspections: ImageInspection[]) {
   const content: ContentItem[] = items.map(({ id, html }) => ({ type: 'post', id, url: `https://example.com/p${id}/`, title: `P${id}`, html, featuredMediaId: null }));
@@ -104,7 +104,7 @@ describe('determinism and inspection stats', () => {
   it('summarizes inspections and lists failures', () => {
     const { report } = detect(
       [{ id: 1, html: `<img src="${up}a.jpg"><img src="${up}a-1.jpg">` }],
-      [ok(`${up}a.jpg`, 'a', 120), { url: `${up}a-1.jpg`, ok: false, error: 'HTTP 404', httpStatus: 404 }],
+      [ok(`${up}a.jpg`, 'a', 120), { url: `${up}a-1.jpg`, status: 'missing', method: 'GET', reason: 'http-status', error: 'HTTP 404', httpStatus: 404 }],
     );
     expect(report.inspection).toEqual({ attempted: 2, inspected: 1, failed: 1, bytesDownloaded: 120 });
     expect(report.failures).toEqual([{ url: `${up}a-1.jpg`, error: 'HTTP 404', httpStatus: 404 }]);

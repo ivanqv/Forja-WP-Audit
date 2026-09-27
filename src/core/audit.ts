@@ -1,4 +1,5 @@
 import { detectDuplicates } from './duplicates.js';
+import { buildMediaHealth, parseAllowedDomain } from './health.js';
 import { inspectImages } from './inspect.js';
 import { buildInventory } from './inventory.js';
 import { createSafeHttp, type SafeFetch, type SafeStream } from './safe-fetch.js';
@@ -20,6 +21,10 @@ export interface AuditOptions {
   allowPrivateNetwork?: boolean;
   /** Download and hash images, then classify duplicates. Default false. */
   duplicates?: boolean;
+  /** Check every image URL (HEAD, or the shared download when `duplicates` is on). Default false. */
+  health?: boolean;
+  /** Extra image hosts that are expected (exact host or `*.suffix`). The site's own host is always allowed. */
+  allowedDomains?: string[];
   concurrency?: number;
   onProgress?: (event: AuditProgress) => void;
   now?: () => Date;
@@ -28,6 +33,7 @@ export interface AuditOptions {
 /** Discovers images referenced by a WordPress site's published posts and pages. Read-only. */
 export async function runAudit(siteUrlInput: string, options: AuditOptions = {}): Promise<Inventory> {
   const siteUrl = parseSiteUrl(siteUrlInput);
+  const allowedDomains = (options.allowedDomains ?? []).map(parseAllowedDomain);
   const http = createSafeHttp({ allowPrivateNetwork: options.allowPrivateNetwork });
   const fetch = options.fetch ?? http.fetch;
   const onProgress = options.onProgress ?? (() => {});
@@ -66,16 +72,23 @@ export async function runAudit(siteUrlInput: string, options: AuditOptions = {})
     featuredMedia,
     warnings,
   });
-  if (!options.duplicates) return inventory;
+  if (!options.duplicates && !options.health) return inventory;
 
+  // One pass serves both features: duplicates need the bytes, health alone only needs headers.
+  const mode = options.duplicates ? 'download' : 'head';
   onProgress({ stage: 'inspect', done: 0, total: inventory.images.length });
   const inspections = await inspectImages(
     inventory.images.map((i) => i.url),
     {
       stream: options.stream ?? http.stream,
+      mode,
       concurrency: options.concurrency,
       onProgress: (done, total) => onProgress({ stage: 'inspect', done, total }),
     },
   );
-  return { ...inventory, duplicates: detectDuplicates(inventory, inspections) };
+  return {
+    ...inventory,
+    ...(options.duplicates ? { duplicates: detectDuplicates(inventory, inspections) } : {}),
+    ...(options.health ? { mediaHealth: buildMediaHealth(inventory, inspections, { mode, allowedDomains }) } : {}),
+  };
 }
