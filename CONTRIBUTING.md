@@ -37,9 +37,16 @@ Install dependencies:
 pnpm install
 ```
 
-Once the initial development setup is available, the project will provide commands for development, linting, type checking and automated tests.
+Available commands:
 
-Refer to `package.json` for the currently supported commands.
+```bash
+pnpm dev audit https://example.com   # run the CLI from source
+pnpm lint
+pnpm typecheck
+pnpm test
+```
+
+Refer to `package.json` for the full list.
 
 ## Branch Naming
 

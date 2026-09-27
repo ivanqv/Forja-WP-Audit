@@ -1,0 +1,139 @@
+{
+  "schemaVersion": 1,
+  "siteUrl": "https://example.com/",
+  "auditedAt": "2026-01-15T10:00:00.000Z",
+  "stats": {
+    "postsAnalyzed": 2,
+    "pagesAnalyzed": 1,
+    "totalImageReferences": 7,
+    "uniqueImageUrls": 6
+  },
+  "images": [
+    {
+      "url": "https://cdn.example.org/team.webp",
+      "filename": "team.webp",
+      "hostname": "cdn.example.org",
+      "referenceCount": 1,
+      "sources": [
+        "img-src"
+      ],
+      "references": [
+        {
+          "type": "page",
+          "id": 2,
+          "url": "https://example.com/about/",
+          "title": "About"
+        }
+      ]
+    },
+    {
+      "url": "https://example.com/wp-content/uploads/2025/03/banner-1024x576.jpg",
+      "filename": "banner-1024x576.jpg",
+      "hostname": "example.com",
+      "referenceCount": 1,
+      "sources": [
+        "srcset"
+      ],
+      "references": [
+        {
+          "type": "post",
+          "id": 12,
+          "url": "https://example.com/hello-world/",
+          "title": "Hello world"
+        }
+      ]
+    },
+    {
+      "url": "https://example.com/wp-content/uploads/2025/03/banner-300x169.jpg",
+      "filename": "banner-300x169.jpg",
+      "hostname": "example.com",
+      "referenceCount": 1,
+      "sources": [
+        "srcset"
+      ],
+      "references": [
+        {
+          "type": "post",
+          "id": 12,
+          "url": "https://example.com/hello-world/",
+          "title": "Hello world"
+        }
+      ]
+    },
+    {
+      "url": "https://example.com/wp-content/uploads/2025/03/banner.jpg",
+      "filename": "banner.jpg",
+      "hostname": "example.com",
+      "referenceCount": 2,
+      "sources": [
+        "img-src"
+      ],
+      "references": [
+        {
+          "type": "post",
+          "id": 12,
+          "url": "https://example.com/hello-world/",
+          "title": "Hello world"
+        },
+        {
+          "type": "post",
+          "id": 15,
+          "url": "https://example.com/migration-notes/",
+          "title": "Migration notes"
+        }
+      ]
+    },
+    {
+      "url": "https://example.com/wp-content/uploads/2025/03/cover.jpg",
+      "filename": "cover.jpg",
+      "hostname": "example.com",
+      "referenceCount": 1,
+      "sources": [
+        "featured"
+      ],
+      "references": [
+        {
+          "type": "post",
+          "id": 12,
+          "url": "https://example.com/hello-world/",
+          "title": "Hello world"
+        }
+      ]
+    },
+    {
+      "url": "https://staging.example.net/wp-content/uploads/diagram.png",
+      "filename": "diagram.png",
+      "hostname": "staging.example.net",
+      "referenceCount": 1,
+      "sources": [
+        "img-src"
+      ],
+      "references": [
+        {
+          "type": "post",
+          "id": 15,
+          "url": "https://example.com/migration-notes/",
+          "title": "Migration notes"
+        }
+      ]
+    }
+  ],
+  "domains": [
+    {
+      "hostname": "example.com",
+      "uniqueImageUrls": 4,
+      "imageReferences": 5
+    },
+    {
+      "hostname": "cdn.example.org",
+      "uniqueImageUrls": 1,
+      "imageReferences": 1
+    },
+    {
+      "hostname": "staging.example.net",
+      "uniqueImageUrls": 1,
+      "imageReferences": 1
+    }
+  ],
+  "warnings": []
+}
