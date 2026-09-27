@@ -1,5 +1,8 @@
 import { lookup as dnsLookup } from 'node:dns/promises';
-import { BlockList, isIP } from 'node:net';
+import http from 'node:http';
+import https from 'node:https';
+import { BlockList, isIP, type LookupFunction } from 'node:net';
+import { setTimeout as sleep } from 'node:timers/promises';
 
 export class BlockedDestinationError extends Error {}
 export class HttpRequestError extends Error {}
@@ -11,19 +14,48 @@ export interface HttpResponse {
   body: string;
 }
 
+/** A response whose body has not been read yet. Callers must consume or `cancel()` it. */
+export interface StreamResponse {
+  status: number;
+  url: string;
+  headers: Headers;
+  body: AsyncIterable<Uint8Array>;
+  cancel: () => void;
+}
+
 export type Lookup = (hostname: string) => Promise<{ address: string; family: number }[]>;
+
+/** Low-level GET used by the safe client; injectable for tests. */
+export type Transport = (
+  url: URL,
+  init: { signal: AbortSignal; headers: Record<string, string>; lookup: LookupFunction },
+) => Promise<{ status: number; headers: Headers; body: AsyncIterable<Uint8Array>; cancel: () => void }>;
 
 export interface SafeFetchOptions {
   /** Allow loopback/private/link-local destinations (tests, local development). Default false. */
   allowPrivateNetwork?: boolean;
+  /** Per-attempt timeout covering connection, headers and body. */
   timeoutMs?: number;
+  /** Response size cap for `fetch` (text) responses. */
   maxBytes?: number;
   maxRedirects?: number;
-  fetchImpl?: typeof fetch;
+  /** Retries for HTTP 429 and transient 5xx responses. Default 2. */
+  retries?: number;
+  /** Base delay for exponential backoff when no Retry-After is sent. */
+  retryBaseDelayMs?: number;
+  /** Upper bound for any single wait, including Retry-After. */
+  maxRetryWaitMs?: number;
+  transport?: Transport;
   lookup?: Lookup;
 }
 
 export type SafeFetch = (url: string) => Promise<HttpResponse>;
+export type SafeStream = (url: string, accept: string) => Promise<StreamResponse>;
+
+export interface SafeHttp {
+  fetch: SafeFetch;
+  stream: SafeStream;
+}
 
 const blocked = new BlockList();
 for (const [net, prefix] of [
@@ -45,85 +77,143 @@ export function isPrivateAddress(address: string): boolean {
 const defaultLookup: Lookup = (hostname) => dnsLookup(hostname, { all: true });
 
 /**
- * Creates a read-only GET fetcher with SSRF protection: every hop (including
- * redirects) must be http(s) and resolve only to public addresses, responses are
- * size-capped and the whole request is bounded by a timeout.
- *
- * ponytail: checks DNS before connecting, so a DNS-rebinding race remains possible;
- * pin the resolved IP in a custom undici dispatcher if that threat matters.
+ * DNS lookup used by the socket itself: the address that is validated is the
+ * address that is connected to, so DNS rebinding between check and connect is not possible.
  */
-export function createSafeFetch(options: SafeFetchOptions = {}): SafeFetch {
+export function createGuardedLookup(allowPrivateNetwork: boolean, resolve: Lookup = defaultLookup): LookupFunction {
+  return (hostname, options, callback) => {
+    resolve(hostname).then(
+      (addresses) => {
+        const first = addresses[0];
+        if (!first || (!allowPrivateNetwork && addresses.some((a) => isPrivateAddress(a.address)))) {
+          callback(blockedError(hostname), '', 0);
+          return;
+        }
+        if (options.all) (callback as unknown as (e: null, a: typeof addresses) => void)(null, addresses);
+        else callback(null, first.address, first.family);
+      },
+      (err: NodeJS.ErrnoException) => callback(err, '', 0),
+    );
+  };
+}
+
+const blockedError = (host: string) =>
+  new BlockedDestinationError(`Blocked request to ${host}: it resolves to a private, loopback or link-local address.`);
+
+const defaultTransport: Transport = (url, { signal, headers, lookup }) =>
+  new Promise((resolve, reject) => {
+    const client = url.protocol === 'https:' ? https : http;
+    // agent: false → a fresh socket per request, so every connection goes through the guarded lookup.
+    const req = client.get(url, { headers, signal, lookup, agent: false }, (res) => {
+      const h = new Headers();
+      for (const [k, v] of Object.entries(res.headers)) {
+        if (v !== undefined) h.set(k, Array.isArray(v) ? v.join(', ') : v);
+      }
+      resolve({ status: res.statusCode ?? 0, headers: h, body: res, cancel: () => res.destroy() });
+    });
+    req.on('error', reject);
+  });
+
+const RETRYABLE = new Set([429, 500, 502, 503, 504]);
+
+/** Parses Retry-After (seconds or HTTP date) into milliseconds. */
+export function parseRetryAfter(value: string | null, now = Date.now()): number | null {
+  if (!value) return null;
+  if (/^\d+$/.test(value.trim())) return Number(value) * 1000;
+  const date = Date.parse(value);
+  return Number.isNaN(date) ? null : Math.max(0, date - now);
+}
+
+/**
+ * Read-only GET client with SSRF protection: every hop (including redirects) must be
+ * http(s); IP literals are checked up front and hostnames are checked at connect time.
+ * Requests are bounded by a timeout, retried a bounded number of times on 429/5xx, and
+ * text responses are size-capped.
+ */
+export function createSafeHttp(options: SafeFetchOptions = {}): SafeHttp {
   const {
     allowPrivateNetwork = false,
     timeoutMs = 15_000,
     maxBytes = 32 * 1024 * 1024,
     maxRedirects = 5,
-    fetchImpl = fetch,
-    lookup = defaultLookup,
+    retries = 2,
+    retryBaseDelayMs = 500,
+    maxRetryWaitMs = 10_000,
+    transport = defaultTransport,
   } = options;
+  const lookup = createGuardedLookup(allowPrivateNetwork, options.lookup);
 
-  const assertAllowed = async (url: URL) => {
+  const assertAllowed = (url: URL) => {
     if (url.protocol !== 'http:' && url.protocol !== 'https:') {
       throw new BlockedDestinationError(`Blocked non-http(s) destination: ${url.protocol}`);
     }
-    if (allowPrivateNetwork) return;
     const host = url.hostname.replace(/^\[|\]$/g, '');
-    const addresses = isIP(host) ? [host] : (await lookup(host)).map((a) => a.address);
-    if (addresses.length === 0 || addresses.some(isPrivateAddress)) {
-      throw new BlockedDestinationError(
-        `Blocked request to ${url.hostname}: it resolves to a private, loopback or link-local address.`,
-      );
-    }
+    // Sockets skip DNS lookup for IP literals, so they must be checked here.
+    if (!allowPrivateNetwork && isIP(host) && isPrivateAddress(host)) throw blockedError(url.hostname);
   };
 
-  return async (input) => {
+  const attempt = async (input: string, accept: string): Promise<StreamResponse> => {
     let url = new URL(input);
     const signal = AbortSignal.timeout(timeoutMs);
+    const where = () => `${url.origin}${url.pathname}`;
     for (let hop = 0; hop <= maxRedirects; hop++) {
-      await assertAllowed(url);
-      let res: Response;
+      assertAllowed(url);
+      let res: Awaited<ReturnType<Transport>>;
       try {
-        res = await fetchImpl(url, {
-          method: 'GET',
-          redirect: 'manual',
-          signal,
-          headers: { accept: 'application/json', 'user-agent': 'forja-wp-audit' },
-        });
+        res = await transport(url, { signal, lookup, headers: { accept, 'user-agent': 'forja-wp-audit' } });
       } catch (err) {
-        if (signal.aborted) throw new HttpRequestError(`Request timed out after ${timeoutMs} ms: ${url.origin}${url.pathname}`);
-        throw new HttpRequestError(`Request failed for ${url.origin}${url.pathname}: ${(err as Error).message}`);
+        if (err instanceof BlockedDestinationError) throw err;
+        if (signal.aborted) throw new HttpRequestError(`Request timed out after ${timeoutMs} ms: ${where()}`);
+        throw new HttpRequestError(`Request failed for ${where()}: ${(err as Error).message}`);
       }
       const location = res.headers.get('location');
       if (res.status >= 300 && res.status < 400 && location) {
-        await res.body?.cancel();
+        res.cancel();
         url = new URL(location, url);
         continue;
       }
-      try {
-        return { status: res.status, url: url.href, headers: res.headers, body: await readCapped(res, maxBytes) };
-      } catch (err) {
-        if (signal.aborted) throw new HttpRequestError(`Request timed out after ${timeoutMs} ms: ${url.origin}${url.pathname}`);
-        throw err;
-      }
+      const body = (async function* () {
+        try {
+          for await (const chunk of res.body) yield chunk;
+        } catch (err) {
+          if (signal.aborted) throw new HttpRequestError(`Request timed out after ${timeoutMs} ms: ${where()}`);
+          throw err;
+        }
+      })();
+      return { status: res.status, url: url.href, headers: res.headers, body, cancel: res.cancel };
     }
     throw new HttpRequestError(`Too many redirects (more than ${maxRedirects}).`);
   };
+
+  const stream: SafeStream = async (url, accept) => {
+    for (let n = 0; ; n++) {
+      const res = await attempt(url, accept);
+      if (!RETRYABLE.has(res.status) || n >= retries) return res;
+      res.cancel();
+      const wait = parseRetryAfter(res.headers.get('retry-after')) ?? retryBaseDelayMs * 2 ** n;
+      await sleep(Math.min(wait, maxRetryWaitMs));
+    }
+  };
+
+  const fetch: SafeFetch = async (url) => {
+    const res = await stream(url, 'application/json');
+    const chunks: Uint8Array[] = [];
+    let size = 0;
+    for await (const chunk of res.body) {
+      size += chunk.byteLength;
+      if (size > maxBytes) {
+        res.cancel();
+        throw new HttpRequestError(`Response exceeded ${maxBytes} bytes.`);
+      }
+      chunks.push(chunk);
+    }
+    return { status: res.status, url: res.url, headers: res.headers, body: Buffer.concat(chunks).toString('utf8') };
+  };
+
+  return { fetch, stream };
 }
 
-async function readCapped(res: Response, maxBytes: number): Promise<string> {
-  if (!res.body) return '';
-  const reader = res.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let size = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    size += value.byteLength;
-    if (size > maxBytes) {
-      await reader.cancel();
-      throw new HttpRequestError(`Response exceeded ${maxBytes} bytes.`);
-    }
-    chunks.push(value);
-  }
-  return Buffer.concat(chunks).toString('utf8');
+/** Text-only convenience wrapper (Sprint 01 API). */
+export function createSafeFetch(options: SafeFetchOptions = {}): SafeFetch {
+  return createSafeHttp(options).fetch;
 }

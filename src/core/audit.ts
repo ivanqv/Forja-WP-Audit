@@ -1,5 +1,7 @@
+import { detectDuplicates } from './duplicates.js';
+import { inspectImages } from './inspect.js';
 import { buildInventory } from './inventory.js';
-import { createSafeFetch, type SafeFetch } from './safe-fetch.js';
+import { createSafeHttp, type SafeFetch, type SafeStream } from './safe-fetch.js';
 import type { ContentType, Inventory } from './types.js';
 import { parseSiteUrl } from './url.js';
 import { WpClient } from './wp-client.js';
@@ -7,12 +9,17 @@ import { WpClient } from './wp-client.js';
 export type AuditProgress =
   | { stage: 'detect' }
   | { stage: 'content'; type: ContentType; page: number; totalPages: number }
-  | { stage: 'media'; count: number };
+  | { stage: 'media'; count: number }
+  | { stage: 'inspect'; done: number; total: number };
 
 export interface AuditOptions {
   /** Custom fetcher (tests, alternative transports). Defaults to the SSRF-protected fetcher. */
   fetch?: SafeFetch;
+  /** Streaming fetcher for image downloads. Defaults to the SSRF-protected client. */
+  stream?: SafeStream;
   allowPrivateNetwork?: boolean;
+  /** Download and hash images, then classify duplicates. Default false. */
+  duplicates?: boolean;
   concurrency?: number;
   onProgress?: (event: AuditProgress) => void;
   now?: () => Date;
@@ -21,7 +28,8 @@ export interface AuditOptions {
 /** Discovers images referenced by a WordPress site's published posts and pages. Read-only. */
 export async function runAudit(siteUrlInput: string, options: AuditOptions = {}): Promise<Inventory> {
   const siteUrl = parseSiteUrl(siteUrlInput);
-  const fetch = options.fetch ?? createSafeFetch({ allowPrivateNetwork: options.allowPrivateNetwork });
+  const http = createSafeHttp({ allowPrivateNetwork: options.allowPrivateNetwork });
+  const fetch = options.fetch ?? http.fetch;
   const onProgress = options.onProgress ?? (() => {});
   const client = new WpClient(siteUrl, {
     fetch,
@@ -51,11 +59,23 @@ export async function runAudit(siteUrlInput: string, options: AuditOptions = {})
     }
   }
 
-  return buildInventory({
+  const inventory = buildInventory({
     siteUrl: siteUrl.href,
     auditedAt: (options.now ?? (() => new Date()))(),
     items,
     featuredMedia,
     warnings,
   });
+  if (!options.duplicates) return inventory;
+
+  onProgress({ stage: 'inspect', done: 0, total: inventory.images.length });
+  const inspections = await inspectImages(
+    inventory.images.map((i) => i.url),
+    {
+      stream: options.stream ?? http.stream,
+      concurrency: options.concurrency,
+      onProgress: (done, total) => onProgress({ stage: 'inspect', done, total }),
+    },
+  );
+  return { ...inventory, duplicates: detectDuplicates(inventory, inspections) };
 }
