@@ -5,24 +5,41 @@
   "stats": {
     "postsAnalyzed": 2,
     "pagesAnalyzed": 1,
-    "totalImageReferences": 7,
-    "uniqueImageUrls": 6
+    "totalImageReferences": 9,
+    "uniqueImageUrls": 9
   },
   "images": [
     {
-      "url": "https://cdn.example.org/team.webp",
-      "filename": "team.webp",
-      "hostname": "cdn.example.org",
+      "url": "https://cdn.example.com/wp-content/uploads/2025/03/banner.jpg",
+      "filename": "banner.jpg",
+      "hostname": "cdn.example.com",
       "referenceCount": 1,
       "sources": [
         "img-src"
       ],
       "references": [
         {
-          "type": "page",
-          "id": 2,
-          "url": "https://example.com/about/",
-          "title": "About"
+          "type": "post",
+          "id": 15,
+          "url": "https://example.com/migration-notes/",
+          "title": "Migration notes"
+        }
+      ]
+    },
+    {
+      "url": "https://example.com/wp-content/uploads/2025/03/banner-1.jpg",
+      "filename": "banner-1.jpg",
+      "hostname": "example.com",
+      "referenceCount": 1,
+      "sources": [
+        "img-src"
+      ],
+      "references": [
+        {
+          "type": "post",
+          "id": 15,
+          "url": "https://example.com/migration-notes/",
+          "title": "Migration notes"
         }
       ]
     },
@@ -64,7 +81,7 @@
       "url": "https://example.com/wp-content/uploads/2025/03/banner.jpg",
       "filename": "banner.jpg",
       "hostname": "example.com",
-      "referenceCount": 2,
+      "referenceCount": 1,
       "sources": [
         "img-src"
       ],
@@ -74,12 +91,6 @@
           "id": 12,
           "url": "https://example.com/hello-world/",
           "title": "Hello world"
-        },
-        {
-          "type": "post",
-          "id": 15,
-          "url": "https://example.com/migration-notes/",
-          "title": "Migration notes"
         }
       ]
     },
@@ -97,6 +108,40 @@
           "id": 12,
           "url": "https://example.com/hello-world/",
           "title": "Hello world"
+        }
+      ]
+    },
+    {
+      "url": "https://example.com/wp-content/uploads/2025/03/team-final.webp",
+      "filename": "team-final.webp",
+      "hostname": "example.com",
+      "referenceCount": 1,
+      "sources": [
+        "img-src"
+      ],
+      "references": [
+        {
+          "type": "page",
+          "id": 2,
+          "url": "https://example.com/about/",
+          "title": "About"
+        }
+      ]
+    },
+    {
+      "url": "https://example.com/wp-content/uploads/2025/03/team.webp",
+      "filename": "team.webp",
+      "hostname": "example.com",
+      "referenceCount": 1,
+      "sources": [
+        "img-src"
+      ],
+      "references": [
+        {
+          "type": "page",
+          "id": 2,
+          "url": "https://example.com/about/",
+          "title": "About"
         }
       ]
     },
@@ -121,11 +166,11 @@
   "domains": [
     {
       "hostname": "example.com",
-      "uniqueImageUrls": 4,
-      "imageReferences": 5
+      "uniqueImageUrls": 7,
+      "imageReferences": 7
     },
     {
-      "hostname": "cdn.example.org",
+      "hostname": "cdn.example.com",
       "uniqueImageUrls": 1,
       "imageReferences": 1
     },
@@ -135,5 +180,219 @@
       "imageReferences": 1
     }
   ],
-  "warnings": []
+  "warnings": [],
+  "duplicates": {
+    "inspection": {
+      "attempted": 9,
+      "inspected": 8,
+      "failed": 1,
+      "bytesDownloaded": 277000
+    },
+    "failures": [
+      {
+        "url": "https://staging.example.net/wp-content/uploads/diagram.png",
+        "error": "HTTP 404",
+        "httpStatus": 404
+      }
+    ],
+    "exactDuplicates": [
+      {
+        "sha256": "93455dfc444134bc9d8b5567127790f842cd42fbc7fe4b9d4ee1c55ae4d21bdd",
+        "bytes": 48000,
+        "urlCount": 3,
+        "distinctPathCount": 2,
+        "kind": "separate-files",
+        "theoreticalDuplicateBytes": 48000,
+        "files": [
+          {
+            "url": "https://cdn.example.com/wp-content/uploads/2025/03/banner.jpg",
+            "filename": "banner.jpg",
+            "hostname": "cdn.example.com",
+            "sha256": "93455dfc444134bc9d8b5567127790f842cd42fbc7fe4b9d4ee1c55ae4d21bdd",
+            "bytes": 48000,
+            "references": [
+              {
+                "type": "post",
+                "id": 15,
+                "url": "https://example.com/migration-notes/",
+                "title": "Migration notes"
+              }
+            ]
+          },
+          {
+            "url": "https://example.com/wp-content/uploads/2025/03/banner-1.jpg",
+            "filename": "banner-1.jpg",
+            "hostname": "example.com",
+            "sha256": "93455dfc444134bc9d8b5567127790f842cd42fbc7fe4b9d4ee1c55ae4d21bdd",
+            "bytes": 48000,
+            "references": [
+              {
+                "type": "post",
+                "id": 15,
+                "url": "https://example.com/migration-notes/",
+                "title": "Migration notes"
+              }
+            ]
+          },
+          {
+            "url": "https://example.com/wp-content/uploads/2025/03/banner.jpg",
+            "filename": "banner.jpg",
+            "hostname": "example.com",
+            "sha256": "93455dfc444134bc9d8b5567127790f842cd42fbc7fe4b9d4ee1c55ae4d21bdd",
+            "bytes": 48000,
+            "references": [
+              {
+                "type": "post",
+                "id": 12,
+                "url": "https://example.com/hello-world/",
+                "title": "Hello world"
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "filenameCandidates": [
+      {
+        "hostname": "example.com",
+        "baseName": "banner.jpg",
+        "hashEvidence": "all-identical",
+        "members": [
+          {
+            "url": "https://example.com/wp-content/uploads/2025/03/banner-1.jpg",
+            "filename": "banner-1.jpg",
+            "hostname": "example.com",
+            "sha256": "93455dfc444134bc9d8b5567127790f842cd42fbc7fe4b9d4ee1c55ae4d21bdd",
+            "bytes": 48000,
+            "references": [
+              {
+                "type": "post",
+                "id": 15,
+                "url": "https://example.com/migration-notes/",
+                "title": "Migration notes"
+              }
+            ]
+          },
+          {
+            "url": "https://example.com/wp-content/uploads/2025/03/banner.jpg",
+            "filename": "banner.jpg",
+            "hostname": "example.com",
+            "sha256": "93455dfc444134bc9d8b5567127790f842cd42fbc7fe4b9d4ee1c55ae4d21bdd",
+            "bytes": 48000,
+            "references": [
+              {
+                "type": "post",
+                "id": 12,
+                "url": "https://example.com/hello-world/",
+                "title": "Hello world"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "hostname": "example.com",
+        "baseName": "team.webp",
+        "hashEvidence": "all-different",
+        "members": [
+          {
+            "url": "https://example.com/wp-content/uploads/2025/03/team-final.webp",
+            "filename": "team-final.webp",
+            "hostname": "example.com",
+            "sha256": "a9a4822ea6e2e0ff9565e75cb1177214001fc795b4be2d8ba2e9d31366bffde5",
+            "bytes": 21000,
+            "references": [
+              {
+                "type": "page",
+                "id": 2,
+                "url": "https://example.com/about/",
+                "title": "About"
+              }
+            ]
+          },
+          {
+            "url": "https://example.com/wp-content/uploads/2025/03/team.webp",
+            "filename": "team.webp",
+            "hostname": "example.com",
+            "sha256": "6823dab49dcdf939ba671dab366b873170ac7e97f2431bb65bd6a23e7d41d296",
+            "bytes": 20000,
+            "references": [
+              {
+                "type": "page",
+                "id": 2,
+                "url": "https://example.com/about/",
+                "title": "About"
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "responsiveFamilies": [
+      {
+        "hostname": "example.com",
+        "directory": "/wp-content/uploads/2025/03/",
+        "baseName": "banner.jpg",
+        "evidence": "original-referenced",
+        "original": {
+          "url": "https://example.com/wp-content/uploads/2025/03/banner.jpg",
+          "filename": "banner.jpg",
+          "hostname": "example.com",
+          "sha256": "93455dfc444134bc9d8b5567127790f842cd42fbc7fe4b9d4ee1c55ae4d21bdd",
+          "bytes": 48000,
+          "references": [
+            {
+              "type": "post",
+              "id": 12,
+              "url": "https://example.com/hello-world/",
+              "title": "Hello world"
+            }
+          ]
+        },
+        "variants": [
+          {
+            "url": "https://example.com/wp-content/uploads/2025/03/banner-300x169.jpg",
+            "filename": "banner-300x169.jpg",
+            "hostname": "example.com",
+            "sha256": "84286d9229174f9f537ea63105a6fd178ed236763253294f092bfda0a7422678",
+            "bytes": 9000,
+            "references": [
+              {
+                "type": "post",
+                "id": 12,
+                "url": "https://example.com/hello-world/",
+                "title": "Hello world"
+              }
+            ],
+            "kind": "size",
+            "width": 300,
+            "height": 169
+          },
+          {
+            "url": "https://example.com/wp-content/uploads/2025/03/banner-1024x576.jpg",
+            "filename": "banner-1024x576.jpg",
+            "hostname": "example.com",
+            "sha256": "b49343eb4c83a5969ee31189b76a865c4b927be8bee6eaf0ec0fc60a7cdf2473",
+            "bytes": 31000,
+            "references": [
+              {
+                "type": "post",
+                "id": 12,
+                "url": "https://example.com/hello-world/",
+                "title": "Hello world"
+              }
+            ],
+            "kind": "size",
+            "width": 1024,
+            "height": 576
+          }
+        ]
+      }
+    ],
+    "estimate": {
+      "theoreticalDuplicateBytes": 48000,
+      "basis": "downloaded-size-of-identical-files-at-distinct-paths",
+      "note": "Theoretical estimate: downloaded (transfer) size of files with identical SHA-256 content served from distinct paths. It does not prove the files are stored separately and is not guaranteed recoverable disk space. Verify manually before removing anything; this tool never deletes files."
+    }
+  }
 }

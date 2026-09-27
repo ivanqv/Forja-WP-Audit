@@ -5,7 +5,14 @@ import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { EXIT_FAILURE, EXIT_OK, EXIT_USAGE, main } from '../src/cli.js';
 import type { Inventory } from '../src/core/types.js';
+import { fakeImage } from './fixtures.js';
 import { handleWpRequest } from './wp-mock.js';
+
+const images: Record<string, { body: Buffer; status?: number; type?: string }> = {
+  '/wp-content/uploads/hello.jpg': { body: fakeImage('h') },
+  '/wp-content/uploads/hello-300x200.jpg': { body: fakeImage('s', 32) },
+  '/wp-content/uploads/cover.jpg': { body: fakeImage('h') }, // same bytes as hello.jpg
+};
 
 let server: Server;
 let siteUrl: string;
@@ -14,11 +21,13 @@ let outDir: string;
 beforeAll(async () => {
   server = createServer((req, res) => {
     if (req.method !== 'GET') { res.writeHead(405).end(); return; }
+    const img = images[req.url ?? ''];
+    if (img) { res.writeHead(img.status ?? 200, { 'content-type': img.type ?? 'image/jpeg' }).end(img.body); return; }
     const r = handleWpRequest(
       {
-        posts: [{ id: 7, link: 'http://127.0.0.1/hello/', title: 'Hello', content: '<img src="/wp-content/uploads/hello.jpg" srcset="/wp-content/uploads/hello-300x200.jpg 300w">', featured_media: 3 }],
-        pages: [{ id: 2, link: 'http://127.0.0.1/about/', title: 'About', content: '<img src="/wp-content/uploads/hello.jpg">' }],
-        media: [{ id: 3, source_url: 'http://127.0.0.1/wp-content/uploads/cover.jpg' }],
+        posts: [{ id: 7, link: `http://${req.headers.host}/hello/`, title: 'Hello', content: '<img src="/wp-content/uploads/hello.jpg" srcset="/wp-content/uploads/hello-300x200.jpg 300w">', featured_media: 3 }],
+        pages: [{ id: 2, link: `http://${req.headers.host}/about/`, title: 'About', content: '<img src="/wp-content/uploads/hello.jpg">' }],
+        media: [{ id: 3, source_url: `http://${req.headers.host}/wp-content/uploads/cover.jpg` }],
       },
       `http://127.0.0.1${req.url}`,
     );
@@ -52,6 +61,25 @@ describe('cli', () => {
     const inv = JSON.parse(await readFile(join(outDir, 'inventory.json'), 'utf8')) as Inventory;
     expect(inv.stats).toEqual({ postsAnalyzed: 1, pagesAnalyzed: 1, totalImageReferences: 4, uniqueImageUrls: 3 });
     expect(inv.images.find((i) => i.filename === 'hello.jpg')!.references.map((r) => r.title)).toEqual(['Hello', 'About']);
+    // Backward compatibility: no image downloads and no duplicates section without --duplicates.
+    expect(inv).not.toHaveProperty('duplicates');
+    expect(Object.keys(inv)).toEqual(['schemaVersion', 'siteUrl', 'auditedAt', 'stats', 'images', 'domains', 'warnings']);
+  });
+
+  it('detects duplicates with --duplicates', async () => {
+    const c = capture();
+    const code = await main(['audit', siteUrl, '--duplicates', '-o', outDir, '--allow-private-network'], c.io);
+    expect(code).toBe(EXIT_OK);
+    expect(c.err.join('\n')).toContain('Inspected 3/3 images');
+    expect(c.out.join('\n')).toContain("Exact duplicates:  1 group(s)");
+
+    const inv = JSON.parse(await readFile(join(outDir, 'inventory.json'), 'utf8')) as Inventory;
+    const d = inv.duplicates!;
+    expect(d.inspection).toMatchObject({ attempted: 3, inspected: 3, failed: 0 });
+    expect(d.exactDuplicates.map((g) => g.files.map((f) => f.filename))).toEqual([['cover.jpg', 'hello.jpg']]);
+    expect(d.exactDuplicates[0]!.theoreticalDuplicateBytes).toBe(64);
+    expect(d.responsiveFamilies.map((f) => f.baseName)).toEqual(['hello.jpg']);
+    expect(inv.stats.uniqueImageUrls).toBe(3);
   });
 
   it('blocks loopback targets by default', async () => {

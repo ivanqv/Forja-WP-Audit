@@ -3,6 +3,7 @@ import { realpathSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 import { runAudit, type AuditOptions, type AuditProgress } from './core/audit.js';
+import type { Inventory } from './core/types.js';
 import { InvalidSiteUrlError } from './core/url.js';
 import { writeJsonReport } from './report/json.js';
 
@@ -13,10 +14,11 @@ export const EXIT_USAGE = 2;
 const USAGE = `Usage: forja-wp-audit audit <site-url> [options]
 
 Discovers images referenced by a public WordPress site's published posts and pages
-and writes an inventory.json file. Read-only: no content is modified.
+and writes an inventory.json file. Read-only: no content is modified or deleted.
 
 Options:
   -o, --output <dir>          Output directory (default: ./reports)
+      --duplicates            Download and hash images to detect duplicates (slower)
       --allow-private-network Allow loopback/private/link-local targets (local testing only)
   -h, --help                  Show this help`;
 
@@ -36,6 +38,7 @@ export async function main(argv: string[], io: CliIo = consoleIo, auditOptions: 
       options: {
         output: { type: 'string', short: 'o', default: './reports' },
         'allow-private-network': { type: 'boolean', default: false },
+        duplicates: { type: 'boolean', default: false },
         help: { type: 'boolean', short: 'h', default: false },
       },
     });
@@ -58,7 +61,11 @@ export async function main(argv: string[], io: CliIo = consoleIo, auditOptions: 
   try {
     const inventory = await runAudit(siteUrl, {
       allowPrivateNetwork: values['allow-private-network'],
-      onProgress: (e) => io.stderr(formatProgress(e)),
+      duplicates: values.duplicates,
+      onProgress: (e) => {
+        const line = formatProgress(e);
+        if (line) io.stderr(line);
+      },
       ...auditOptions,
     });
     const file = await writeJsonReport(inventory, values.output);
@@ -72,6 +79,7 @@ export async function main(argv: string[], io: CliIo = consoleIo, auditOptions: 
         `  Image references:  ${stats.totalImageReferences}`,
         `  Unique image URLs: ${stats.uniqueImageUrls}`,
         `  Domains:           ${inventory.domains.map((d) => `${d.hostname} (${d.uniqueImageUrls})`).join(', ') || 'none'}`,
+        ...formatDuplicateSummary(inventory),
         ...inventory.warnings.map((w) => `  Warning: ${w}`),
         `Inventory written to ${file}`,
       ].join('\n'),
@@ -83,7 +91,19 @@ export async function main(argv: string[], io: CliIo = consoleIo, auditOptions: 
   }
 }
 
-function formatProgress(e: AuditProgress): string {
+function formatDuplicateSummary({ duplicates: d }: Inventory): string[] {
+  if (!d) return [];
+  const exactFiles = d.exactDuplicates.filter((g) => g.kind === 'separate-files').length;
+  return [
+    `  Images inspected:  ${d.inspection.inspected}/${d.inspection.attempted} (${d.inspection.failed} failed)`,
+    `  Exact duplicates:  ${d.exactDuplicates.length} group(s), ${exactFiles} with separate file paths`,
+    `  Theoretical duplicate bytes: ${d.estimate.theoreticalDuplicateBytes} (estimate, not guaranteed recoverable; verify manually)`,
+    `  Filename candidates: ${d.filenameCandidates.length} group(s) (for review, not confirmed)`,
+    `  Responsive families: ${d.responsiveFamilies.length}`,
+  ];
+}
+
+function formatProgress(e: AuditProgress): string | null {
   switch (e.stage) {
     case 'detect':
       return 'Checking WordPress REST API...';
@@ -91,6 +111,9 @@ function formatProgress(e: AuditProgress): string {
       return `Fetched ${e.type}s page ${e.page}/${e.totalPages}`;
     case 'media':
       return `Resolving ${e.count} featured image(s)...`;
+    case 'inspect':
+      if (e.done === 0) return `Inspecting ${e.total} image(s)...`;
+      return e.done % 10 === 0 || e.done === e.total ? `Inspected ${e.done}/${e.total} images` : null;
   }
 }
 
