@@ -6,6 +6,7 @@ import { runAudit, type AuditOptions, type AuditProgress } from './core/audit.js
 import { InvalidAllowedDomainError } from './core/health.js';
 import type { Inventory } from './core/types.js';
 import { InvalidSiteUrlError } from './core/url.js';
+import { writeHtmlReport } from './report/html.js';
 import { writeJsonReport } from './report/json.js';
 
 export const EXIT_OK = 0;
@@ -15,7 +16,8 @@ export const EXIT_USAGE = 2;
 const USAGE = `Usage: forja-wp-audit audit <site-url> [options]
 
 Discovers images referenced by a public WordPress site's published posts and pages
-and writes an inventory.json file. Read-only: no content is modified or deleted.
+and writes inventory.json (plus report.html with --html).
+Read-only: no content is modified or deleted.
 
 Options:
   -o, --output <dir>          Output directory (default: ./reports)
@@ -26,6 +28,7 @@ Options:
       --allowed-domains <host>
                               Expected image host besides the site itself (repeatable).
                               Exact host, or *.example.com for its subdomains. Requires --health
+      --html                  Also write report.html, a standalone visual report of the inventory
       --allow-private-network Allow loopback/private/link-local targets (local testing only)
   -h, --help                  Show this help`;
 
@@ -48,6 +51,7 @@ export async function main(argv: string[], io: CliIo = consoleIo, auditOptions: 
         duplicates: { type: 'boolean', default: false },
         health: { type: 'boolean', default: false },
         'allowed-domains': { type: 'string', multiple: true, default: [] },
+        html: { type: 'boolean', default: false },
         help: { type: 'boolean', short: 'h', default: false },
       },
     });
@@ -84,6 +88,7 @@ export async function main(argv: string[], io: CliIo = consoleIo, auditOptions: 
       ...auditOptions,
     });
     const file = await writeJsonReport(inventory, values.output);
+    const htmlFile = values.html ? await writeHtmlReport(inventory, values.output) : null;
     const { stats } = inventory;
     io.stdout(
       [
@@ -98,6 +103,7 @@ export async function main(argv: string[], io: CliIo = consoleIo, auditOptions: 
         ...formatHealthSummary(inventory),
         ...inventory.warnings.map((w) => `  Warning: ${w}`),
         `Inventory written to ${file}`,
+        ...(htmlFile ? [`HTML report written to ${htmlFile}`] : []),
       ].join('\n'),
     );
     return EXIT_OK;
