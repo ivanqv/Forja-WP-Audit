@@ -81,25 +81,105 @@ Export structured JSON for additional processing or integration with other tools
 
 ## Installation
 
-**Status: Under development**
+**Status: early development (Sprint 01 — media discovery).** Not yet published to npm; run it from source.
 
-The first public release is being developed. Installation instructions will be available once the CLI is ready.
-
-The planned interface is:
+Requirements: Node.js 22+ and pnpm.
 
 ```bash
-forja-wp-audit audit https://example.com
+git clone https://github.com/ivanqv/Forja-WP-Audit.git
+cd Forja-WP-Audit
+pnpm install
 ```
 
-Additional configuration:
+## Usage
 
 ```bash
-forja-wp-audit audit https://example.com \
-  --allowed-domains example.com \
-  --output ./reports
+pnpm dev audit <site-url> [--output <dir>]
 ```
 
-The command-line interface and options may change before the first release.
+| Option | Description |
+|---|---|
+| `-o, --output <dir>` | Directory for `inventory.json` (default: `./reports`). Created if missing. |
+| `--allow-private-network` | Allow loopback/private/link-local targets. Only for local testing. |
+| `-h, --help` | Show help. |
+
+Example:
+
+```bash
+pnpm dev audit https://example.com --output ./reports
+```
+
+```text
+Checking WordPress REST API...
+Fetched posts page 1/2
+Fetched posts page 2/2
+Fetched pages page 1/1
+
+Audit complete for https://example.com/
+  Posts analyzed:    120
+  Pages analyzed:    1
+  Image references:  241
+  Unique image URLs: 15
+  Domains:           example.com (14), old.example.org (1)
+Inventory written to /path/to/reports/inventory.json
+```
+
+Exit codes: `0` success, `1` audit failure (API unavailable, network error, blocked destination), `2` invalid arguments or URL.
+
+Other scripts: `pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm build`.
+
+### What it does
+
+1. Detects the public WordPress REST API (`/wp-json/`, falling back to `?rest_route=`).
+2. Fetches all published posts and pages (paginated, 100 per request, max 2 concurrent requests).
+3. Extracts images from `<img src>`, `<img srcset>` and `<picture><source srcset>`, plus featured images via the media endpoint.
+4. Resolves relative URLs, normalizes them and deduplicates them. Each srcset variant is kept as its own URL.
+5. Writes `inventory.json`.
+
+### Output: `inventory.json`
+
+A full synthetic example is in [`examples/inventory.example.json`](examples/inventory.example.json). Shape:
+
+```json
+{
+  "schemaVersion": 1,
+  "siteUrl": "https://example.com/",
+  "auditedAt": "2026-01-15T10:00:00.000Z",
+  "stats": { "postsAnalyzed": 2, "pagesAnalyzed": 1, "totalImageReferences": 7, "uniqueImageUrls": 6 },
+  "images": [
+    {
+      "url": "https://example.com/wp-content/uploads/2025/03/banner.jpg",
+      "filename": "banner.jpg",
+      "hostname": "example.com",
+      "referenceCount": 2,
+      "sources": ["img-src"],
+      "references": [
+        { "type": "post", "id": 12, "url": "https://example.com/hello-world/", "title": "Hello world" },
+        { "type": "post", "id": 15, "url": "https://example.com/migration-notes/", "title": "Migration notes" }
+      ]
+    }
+  ],
+  "domains": [
+    { "hostname": "example.com", "uniqueImageUrls": 4, "imageReferences": 5 },
+    { "hostname": "staging.example.net", "uniqueImageUrls": 1, "imageReferences": 1 }
+  ],
+  "warnings": []
+}
+```
+
+- `totalImageReferences` counts distinct (post/page, image URL) pairs. An image repeated inside one post counts once.
+- `sources` records how the URL was found: `img-src`, `srcset` or `featured`.
+- TypeScript types are in [`src/core/types.ts`](src/core/types.ts).
+
+### Known limitations
+
+- Only publicly available, published posts and pages are analyzed. Sites with the REST API disabled or restricted to logged-in users are reported as unavailable.
+- Custom post types, widgets, menus, theme templates, CSS backgrounds and shortcodes that are not rendered into `content` are not scanned.
+- Lazy-load attributes (`data-src`, `data-srcset`) are not read. Only standard `src`/`srcset`.
+- Featured images that the public media endpoint does not return are skipped with a warning.
+- No retries. Rate-limited (HTTP 429) or failing requests abort the audit.
+- Private-network protection checks DNS before connecting. A DNS-rebinding race is not fully prevented.
+- Images are not downloaded, hashed or checked. Duplicate and broken image detection are not implemented yet (see roadmap).
 
 ## How It Works
 
@@ -168,8 +248,8 @@ Learn more:
 
 ### v0.1 — Media Audit
 
-- [ ] WordPress REST API integration.
-- [ ] Media inventory.
+- [x] WordPress REST API integration.
+- [x] Media inventory.
 - [ ] Filename-based duplicate detection.
 - [ ] SHA-256 duplicate detection.
 - [ ] External domain analysis.
