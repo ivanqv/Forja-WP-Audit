@@ -31,6 +31,24 @@ describe('extractImageRefs', () => {
       { url: '/b.jpg', source: 'img-src' },
     ]);
   });
+  it('reads lazy-loading attributes and ignores the placeholder they replace', () => {
+    const html = `
+      <img src="data:image/gif;base64,R0lGOD" data-src="/lazy.jpg" class="lazyload">
+      <img src="/wp-content/plugins/lazy/blank.gif" data-src="/a.jpg" data-srcset="/a-300.jpg 300w, /a-600.jpg 600w">
+      <img src="/lqip-20x10.jpg" data-srcset="/b-300.jpg 300w">
+      <picture><source srcset="/placeholder.webp" data-srcset="/c.webp 1x"><img data-src="/c.jpg"></picture>
+      <img src="/plain.jpg" loading="lazy" data-src="">`;
+    expect(extractImageRefs(html)).toEqual([
+      { url: '/lazy.jpg', source: 'data-src' },
+      { url: '/a.jpg', source: 'data-src' },
+      { url: '/a-300.jpg', source: 'data-srcset' },
+      { url: '/a-600.jpg', source: 'data-srcset' },
+      { url: '/b-300.jpg', source: 'data-srcset' },
+      { url: '/c.webp', source: 'data-srcset' },
+      { url: '/c.jpg', source: 'data-src' },
+      { url: '/plain.jpg', source: 'img-src' },
+    ]);
+  });
   it('decodes HTML entities in attributes', () => {
     expect(extractImageRefs('<img src="/a.jpg?x=1&amp;y=2">')).toEqual([{ url: '/a.jpg?x=1&y=2', source: 'img-src' }]);
   });

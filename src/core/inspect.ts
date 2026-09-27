@@ -1,11 +1,16 @@
 import { createHash } from 'node:crypto';
-import type { SafeStream } from './safe-fetch.js';
-import type { ImageInspection } from './types.js';
+import { BlockedDestinationError, HttpRequestError, type RequestMethod, type SafeStream } from './safe-fetch.js';
+import type { HealthReason, HealthStatus, ImageInspection } from './types.js';
 import { mapLimit } from './wp-client.js';
 
 export interface InspectOptions {
   stream: SafeStream;
-  /** Parallel downloads. Default 2. */
+  /**
+   * `download` (default): GET the whole file and hash it (needed for duplicates).
+   * `head`: HEAD request only, with a GET fallback whose body is never read.
+   */
+  mode?: 'download' | 'head';
+  /** Parallel requests. Default 2. */
   concurrency?: number;
   /** Per-file size limit. Default 25 MiB. */
   maxBytes?: number;
@@ -15,48 +20,72 @@ export interface InspectOptions {
 const ACCEPT = 'image/avif,image/webp,image/*;q=0.8';
 
 /**
- * Downloads each image once and hashes it while streaming (nothing is kept in
- * memory or written to disk). Failures are recorded per image, never thrown.
+ * Inspects each image URL once. Downloads are hashed while streaming (nothing is
+ * kept in memory or written to disk). Failures are classified per image, never thrown.
  */
 export async function inspectImages(urls: string[], options: InspectOptions): Promise<ImageInspection[]> {
-  const { stream, concurrency = 2, maxBytes = 25 * 1024 * 1024, onProgress } = options;
+  const { stream, mode = 'download', concurrency = 2, maxBytes = 25 * 1024 * 1024, onProgress } = options;
   let done = 0;
   return mapLimit(urls, concurrency, async (url) => {
-    const result = await inspectOne(url, stream, maxBytes);
+    let result = await inspectOne(url, stream, maxBytes, mode === 'head' ? 'HEAD' : 'GET');
+    // Servers that reject or misimplement HEAD (405, 403, 404, text/html...) get a second chance via GET.
+    if (result.method === 'HEAD' && result.httpStatus !== undefined && result.status !== 'healthy' && result.status !== 'uninspectable') {
+      result = await inspectOne(url, stream, maxBytes, 'GET', false);
+    }
     onProgress?.(++done, urls.length);
     return result;
   });
 }
 
-async function inspectOne(url: string, stream: SafeStream, maxBytes: number): Promise<ImageInspection> {
-  const fail = (error: string, httpStatus?: number): ImageInspection => ({ url, ok: false, error, ...(httpStatus ? { httpStatus } : {}) });
+async function inspectOne(url: string, stream: SafeStream, maxBytes: number, method: RequestMethod, hash = method === 'GET'): Promise<ImageInspection> {
+  const fail = (status: HealthStatus, reason: HealthReason, error: string, extra: Partial<ImageInspection> = {}): ImageInspection =>
+    ({ url, status, method, reason, error, ...extra });
   try {
-    const res = await stream(url, ACCEPT);
+    const res = await stream(url, ACCEPT, { method });
     const contentType = (res.headers.get('content-type') ?? '').split(';')[0]!.trim().toLowerCase();
-    if (res.status !== 200) {
+    const httpStatus = res.status;
+    const length = res.headers.has('content-length') ? Number(res.headers.get('content-length')) : undefined;
+    const meta = { httpStatus, ...(contentType ? { contentType } : {}) };
+    if (httpStatus < 200 || httpStatus >= 300) {
       res.cancel();
-      return fail(`HTTP ${res.status}`, res.status);
+      const status = httpStatus === 404 || httpStatus === 410 ? 'missing' : 'inaccessible';
+      return fail(status, 'http-status', `HTTP ${httpStatus}`, meta);
     }
     if (!contentType.startsWith('image/')) {
       res.cancel();
-      return fail(`Unexpected content type "${contentType || 'none'}"`, res.status);
+      return fail('unexpected-content', 'content-type', `Unexpected content type "${contentType || 'none'}"`, meta);
     }
-    if (Number(res.headers.get('content-length')) > maxBytes) {
+    if (length !== undefined && length > maxBytes) {
       res.cancel();
-      return fail(`File larger than ${maxBytes} bytes`, res.status);
+      return fail('uninspectable', 'too-large', `File larger than ${maxBytes} bytes`, { ...meta, bytes: length });
     }
-    const hash = createHash('sha256');
+    if (!hash) {
+      res.cancel(); // headers are enough: never download the body for a health check
+      return { url, status: 'healthy', method, ...meta, ...(length !== undefined ? { bytes: length } : {}) };
+    }
+    const sha = createHash('sha256');
     let bytes = 0;
     for await (const chunk of res.body) {
       bytes += chunk.byteLength;
       if (bytes > maxBytes) {
         res.cancel();
-        return fail(`File larger than ${maxBytes} bytes`, res.status);
+        return fail('uninspectable', 'too-large', `File larger than ${maxBytes} bytes`, meta);
       }
-      hash.update(chunk);
+      sha.update(chunk);
     }
-    return { url, ok: true, sha256: hash.digest('hex'), bytes, contentType };
+    return { url, status: 'healthy', method, ...meta, bytes, sha256: sha.digest('hex') };
   } catch (err) {
-    return fail((err as Error).message);
+    const message = (err as Error).message;
+    if (err instanceof BlockedDestinationError) return fail('inaccessible', 'blocked', message);
+    if (err instanceof HttpRequestError) {
+      switch (err.kind) {
+        case 'timeout': return fail('timeout', 'timeout', message);
+        case 'dns': case 'connection': case 'redirect': return fail('unreachable', err.kind, message);
+        case 'too-large': return fail('uninspectable', 'too-large', message);
+      }
+    }
+    // Mid-body socket errors surface as plain errno errors.
+    if ((err as NodeJS.ErrnoException).code) return fail('unreachable', 'connection', message);
+    return fail('unknown', 'error', message);
   }
 }

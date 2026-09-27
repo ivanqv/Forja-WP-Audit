@@ -52,11 +52,15 @@ Discover images loaded from unexpected domains, including:
 
 Configure your allowed domains and identify external dependencies before migrating your website.
 
+Available with `--health --allowed-domains <host>`. External hosts are reported as dependencies to review, not as errors: they may be legitimate CDNs or services.
+
 ### 3. Broken Media Detection
 
 Identify images that are no longer accessible.
 
 Detect HTTP errors, request failures and unexpected responses, and find the WordPress pages referencing each affected image.
+
+Available with `--health`. Confirmed missing files (404/410) are kept apart from resources that are merely inaccessible (403, 5xx), unreachable (DNS, connection) or slow (timeout).
 
 ### 4. Media Usage Mapping
 
@@ -81,7 +85,7 @@ Export structured JSON for additional processing or integration with other tools
 
 ## Installation
 
-**Status: early development (Sprint 01 — media discovery).** Not yet published to npm; run it from source.
+**Status: early development (Sprint 03 — media health and external dependencies).** Not yet published to npm; run it from source.
 
 Requirements: Node.js 22+ and pnpm.
 
@@ -94,13 +98,15 @@ pnpm install
 ## Usage
 
 ```bash
-pnpm dev audit <site-url> [--duplicates] [--output <dir>]
+pnpm dev audit <site-url> [--duplicates] [--health] [--allowed-domains <host>]... [--output <dir>]
 ```
 
 | Option | Description |
 |---|---|
 | `-o, --output <dir>` | Directory for `inventory.json` (default: `./reports`). Created if missing. |
 | `--duplicates` | Download every discovered image once, hash it and detect duplicates. Slower; off by default. |
+| `--health` | Check every image URL and report missing, inaccessible, unreachable and other failures, plus image domains. Uses HEAD requests (see below). |
+| `--allowed-domains <host>` | Image host you expect besides the site itself, e.g. a CDN. Repeatable. Exact host, or `*.example.com` for its subdomains. Requires `--health`. |
 | `--allow-private-network` | Allow loopback/private/link-local targets. Only for local testing. |
 | `-h, --help` | Show help. |
 
@@ -146,7 +152,27 @@ Audit complete for https://example.com/
 Inventory written to /path/to/reports/inventory.json
 ```
 
-Exit codes: `0` success, `1` audit failure (API unavailable, network error, blocked destination), `2` invalid arguments or URL.
+With media health and external domains:
+
+```bash
+pnpm dev audit https://example.com --health --allowed-domains cdn.example.com --output ./reports
+```
+
+```text
+...
+Inspecting 12 image(s)...
+Inspected 10/12 images
+Inspected 12/12 images
+
+Audit complete for https://example.com/
+  ...
+  Media health:      9/12 healthy (1 missing, 1 inaccessible, 1 unreachable)
+  Affected content:  1 post(s), 1 page(s) reference images that are not healthy
+  External image domains: images.partner.example (1), old-domain.example.org (1), staging.example.net (1) (dependencies to review, not necessarily problems)
+Inventory written to /path/to/reports/inventory.json
+```
+
+Exit codes: `0` success, `1` audit failure (API unavailable, network error, blocked destination), `2` invalid arguments, URL or allowed domain.
 
 Other scripts: `pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm build`.
 
@@ -154,10 +180,11 @@ Other scripts: `pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm build`.
 
 1. Detects the public WordPress REST API (`/wp-json/`, falling back to `?rest_route=`).
 2. Fetches all published posts and pages (paginated, 100 per request, max 2 concurrent requests).
-3. Extracts images from `<img src>`, `<img srcset>` and `<picture><source srcset>`, plus featured images via the media endpoint.
+3. Extracts images from `<img src>`, `<img srcset>` and `<picture><source srcset>`, the lazy-loading attributes `data-src` and `data-srcset`, and featured images via the media endpoint. When an element has `data-src`/`data-srcset`, its plain `src`/`srcset` is treated as a placeholder (blank GIF, low-quality preview) and ignored.
 4. Resolves relative URLs, normalizes them and deduplicates them. Each srcset variant is kept as its own URL.
 5. With `--duplicates`: downloads each unique image URL, computes its SHA-256 and classifies duplicates (see below).
-6. Writes `inventory.json`.
+6. With `--health`: checks each unique image URL and classifies image hosts (see below). Combined with `--duplicates`, the same download serves both: no URL is requested twice.
+7. Writes `inventory.json`.
 
 ### Output: `inventory.json`
 
@@ -191,7 +218,7 @@ A full synthetic example is in [`examples/inventory.example.json`](examples/inve
 ```
 
 - `totalImageReferences` counts distinct (post/page, image URL) pairs. An image repeated inside one post counts once.
-- `sources` records how the URL was found: `img-src`, `srcset` or `featured`.
+- `sources` records how the URL was found: `img-src`, `srcset`, `data-src`, `data-srcset` or `featured`. A URL found several ways in one post is one reference with several sources.
 - TypeScript types are in [`src/core/types.ts`](src/core/types.ts).
 
 ### Duplicate detection (`--duplicates`)
@@ -235,9 +262,73 @@ Without `--duplicates` the report is unchanged from earlier versions: no images 
 
 **Performance.** Every unique image URL is downloaded once, at most 2 in parallel. Files are hashed while streaming and never kept in memory or written to disk. Files over 25 MiB, non-`image/*` responses and HTTP errors are recorded in `failures` and do not stop the audit. Expect runtime to scale with total image bytes. Large sites can take a while.
 
+### Media health (`--health`)
+
+Each unique image URL gets exactly one status. A failure is not automatically a "broken image":
+
+| Status | Meaning |
+|---|---|
+| `healthy` | 2xx response with an `image/*` content type, within the 25 MiB inspection limit. |
+| `missing` | The server **confirmed** the file does not exist: HTTP 404 or 410. |
+| `inaccessible` | The server answered but refused or failed: 401, 403, 429 after retries, 5xx, a redirect without `Location`, or a destination blocked by the SSRF policy. **The file may still exist** (hotlink protection, WAF, rate limits, outage). |
+| `unreachable` | No HTTP answer: DNS failure (typical of expired or legacy domains), connection refused/reset, TLS error, redirect loop or invalid redirect. |
+| `timeout` | No complete answer within 15 s. |
+| `unexpected-content` | A successful response that is not an image, e.g. an HTML error page served with 200. |
+| `uninspectable` | An image larger than the 25 MiB limit. It exists but was not inspected further. |
+| `unknown` | Anything else. `error` holds the detail. |
+
+Every entry also records `reason` (`http-status`, `dns`, `connection`, `redirect`, `timeout`, `blocked`, `content-type`, `too-large`, `error`), `httpStatus` and the request `method`.
+
+**Lightweight checks.** Without `--duplicates`, each URL gets a `HEAD` request and no image is downloaded. If `HEAD` returns an HTTP answer that is not healthy (servers that reject or misimplement `HEAD` with 405, 403, 404 or an HTML page), one `GET` is sent and cancelled as soon as its headers arrive. The body is never read. Network errors (DNS, timeout) are not retried via `GET`. With `--duplicates`, the full download done for hashing provides the health status as well. Concurrency (2) and retries (429/5xx) are the same as for downloads.
+
+### External domains
+
+Every image host is classified:
+
+| Classification | Rule |
+|---|---|
+| `internal` | The audited site's hostname, plus its `www.`/bare twin (`example.com` ↔ `www.example.com`). |
+| `allowed` | Matches an `--allowed-domains` entry. |
+| `external` | Everything else: an **external dependency** to review. |
+
+External is not a verdict. A dependency can be a legitimate CDN or service (add it with `--allowed-domains`), or a previous domain, a staging server or a third-party site you would lose control of during a migration.
+
+Allowlist matching is explicit: `example.com` matches only `example.com`, never `cdn.example.com` or `malicious-example.com`. `*.example.com` matches subdomains such as `cdn.example.com` but not `example.com` itself. Entries with a scheme, path, port or any other wildcard are rejected (exit code 2).
+
+### Output: `mediaHealth`
+
+Present only with `--health`. Excerpt (full example in [`examples/inventory.example.json`](examples/inventory.example.json)):
+
+```json
+"mediaHealth": {
+  "internalHostnames": ["example.com", "www.example.com"],
+  "allowedDomains": ["cdn.example.com"],
+  "inspection": { "mode": "download", "attempted": 12, "getFallbacks": 0 },
+  "summary": {
+    "imageUrls": 12, "healthy": 9, "notHealthy": 3,
+    "byStatus": { "healthy": 9, "missing": 1, "inaccessible": 1, "unreachable": 1, "timeout": 0, "unexpected-content": 0, "uninspectable": 0, "unknown": 0 },
+    "affectedPosts": 1, "affectedPages": 1,
+    "internalUrls": 8, "allowedExternalUrls": 1, "externalDependencyUrls": 3, "externalDependencyDomains": 3
+  },
+  "images": [{ "url": "https://staging.example.net/wp-content/uploads/diagram.png", "hostname": "staging.example.net", "classification": "external", "status": "missing", "method": "GET", "reason": "http-status", "error": "HTTP 404", "httpStatus": 404, "contentType": "text/html", "referenceCount": 1 }, "…"],
+  "affectedContent": [{ "type": "post", "id": 15, "url": "https://example.com/migration-notes/", "title": "Migration notes", "problems": [{ "url": "…/logo.png", "status": "unreachable" }, "…"] }],
+  "domains": [{
+    "hostname": "old-domain.example.org", "classification": "external", "imageUrls": 1, "affectedPosts": 1, "affectedPages": 0,
+    "health": { "healthy": 0, "unreachable": 1, "…": 0 }, "exampleUrls": ["https://old-domain.example.org/wp-content/uploads/2019/logo.png"],
+    "references": [{ "type": "post", "id": 15, "url": "https://example.com/migration-notes/", "title": "Migration notes" }]
+  }, "…"]
+}
+```
+
+- `images`: one entry per unique URL, in inventory order.
+- `affectedContent`: posts and pages referencing at least one image that is not healthy.
+- `domains`: every image host (external first), with the posts/pages depending on it, up to 3 example URLs (problems first) and a status count.
+
+Without `--health` there is no `mediaHealth` key. `schemaVersion` stays `1`: the section and the two new `sources` values are additive.
+
 ### Network and security
 
-- Only GET requests are made. Credentials in URLs are rejected.
+- Only GET and HEAD requests are made. Credentials in URLs are rejected. HEAD and GET-fallback requests go through the same protected client as downloads.
 - Private, loopback, link-local, CGNAT and multicast destinations are blocked by default. Hostnames are checked by the socket's own DNS lookup at connect time, which closes the DNS-rebinding gap. IP literals are checked before connecting, and every redirect hop is revalidated.
 - Timeouts: 15 s per request attempt. Text responses are capped at 32 MiB, images at 25 MiB.
 - HTTP 429 and 500/502/503/504 are retried up to 2 times. `Retry-After` is honored, capped at 10 s per wait.
@@ -247,13 +338,15 @@ Without `--duplicates` the report is unchanged from earlier versions: no images 
 
 - Only publicly available, published posts and pages are analyzed. Sites with the REST API disabled or restricted to logged-in users are reported as unavailable.
 - Custom post types, widgets, menus, theme templates, CSS backgrounds and shortcodes that are not rendered into `content` are not scanned.
-- Lazy-load attributes (`data-src`, `data-srcset`) are not read. Only standard `src`/`srcset`.
+- Lazy-load attributes other than `data-src`/`data-srcset` (e.g. `data-lazy-src`, `data-bg`) are not read. Images injected only by JavaScript are not visible.
 - Featured images that the public media endpoint does not return are skipped with a warning.
 - WordPress API requests that still fail after retries abort the audit. Image failures do not.
 - Duplicate detection compares exact bytes only. Re-encoded, resized or visually similar images are not detected (no perceptual hashing).
 - WordPress edited-image suffixes (`-e1700000000`) and custom size naming are not recognized as responsive variants.
 - Alias detection is heuristic (same path or origin host embedded in the path). CDNs that rewrite paths differently count as separate files.
-- Broken image detection is not implemented yet. Failed downloads are listed, but not analyzed as broken media.
+- Health checks trust the HTTP status and `Content-Type`. The image bytes are not decoded, so a corrupt file served as `image/jpeg` is reported healthy.
+- A health check reflects one moment from one network location. `inaccessible` and `timeout` can be transient or specific to the auditing machine (geo-blocking, WAF).
+- Only the `www.` twin of the site host is internal by default. Other hosts you own (a CDN subdomain, an old domain you still control) must be passed with `--allowed-domains`.
 
 ## How It Works
 
@@ -326,8 +419,8 @@ Learn more:
 - [x] Media inventory.
 - [x] Filename-based duplicate detection.
 - [x] SHA-256 duplicate detection.
-- [ ] External domain analysis.
-- [ ] Broken image detection.
+- [x] External domain analysis.
+- [x] Broken image detection.
 - [ ] HTML and JSON reports.
 - [x] Automated tests.
 

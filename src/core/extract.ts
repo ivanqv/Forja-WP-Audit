@@ -35,10 +35,18 @@ export function extractImageRefs(html: string): RawImageRef[] {
   const root = parse(html);
   const refs: RawImageRef[] = [];
   for (const el of root.querySelectorAll('img, picture source')) {
+    const isImg = el.tagName === 'IMG';
+    const dataSrc = isImg ? el.getAttribute('data-src')?.trim() : undefined;
+    const dataSrcset = el.getAttribute('data-srcset')?.trim();
+    // Lazy loaders (lazysizes, a3, theme scripts) keep the real image in data-*; the plain
+    // src/srcset then hold a placeholder (blank.gif, low-quality preview, data: URI).
+    const lazy = Boolean(dataSrc || dataSrcset);
     const src = el.getAttribute('src');
-    if (src && el.tagName === 'IMG') refs.push({ url: src, source: 'img-src' });
+    if (isImg && src && !lazy) refs.push({ url: src, source: 'img-src' });
     const srcset = el.getAttribute('srcset');
-    if (srcset) for (const url of parseSrcset(srcset)) refs.push({ url, source: 'srcset' });
+    if (srcset && !lazy) for (const url of parseSrcset(srcset)) refs.push({ url, source: 'srcset' });
+    if (dataSrc) refs.push({ url: dataSrc, source: 'data-src' });
+    if (dataSrcset) for (const url of parseSrcset(dataSrcset)) refs.push({ url, source: 'data-srcset' });
   }
   return refs;
 }

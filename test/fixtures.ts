@@ -12,13 +12,20 @@ export interface MockFile {
   type?: string;
   headers?: Record<string, string>;
   error?: Error;
+  /** Different answer for HEAD requests (servers that misimplement HEAD). */
+  head?: MockFile;
 }
 
-/** Mocked SafeStream serving synthetic files by URL. Unknown URLs return 404. */
-export function mockStream(files: Record<string, MockFile>, log: string[] = []): SafeStream {
-  return async (url): Promise<StreamResponse> => {
-    log.push(url);
-    const f = files[url] ?? { status: 404, type: 'text/html', body: Buffer.from('not found') };
+/**
+ * Mocked SafeStream serving synthetic files by URL. Unknown URLs return 404.
+ * Logs GET requests as the bare URL and HEAD requests as `HEAD <url>`; `read` collects URLs whose body was consumed.
+ */
+export function mockStream(files: Record<string, MockFile>, log: string[] = [], read: string[] = []): SafeStream {
+  return async (url, _accept, init): Promise<StreamResponse> => {
+    const head = init?.method === 'HEAD';
+    log.push(head ? `HEAD ${url}` : url);
+    const file = files[url] ?? { status: 404, type: 'text/html', body: Buffer.from('not found') };
+    const f = head ? { ...file, ...file.head, body: undefined } : file;
     if (f.error) throw f.error;
     const body = f.body ?? Buffer.alloc(0);
     return {
@@ -26,6 +33,7 @@ export function mockStream(files: Record<string, MockFile>, log: string[] = []):
       url,
       headers: new Headers({ 'content-type': f.type ?? 'image/png', ...f.headers }),
       body: (async function* () {
+        read.push(url);
         for (let i = 0; i < body.length; i += 16) yield body.subarray(i, i + 16);
       })(),
       cancel: () => {},

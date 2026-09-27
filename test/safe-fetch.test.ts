@@ -99,6 +99,30 @@ describe('createSafeHttp with a mocked transport', () => {
     expect(Date.now() - started).toBeLessThan(1000);
   });
 
+  it('classifies failures so callers can tell DNS, connection, timeout and redirect problems apart', async () => {
+    const failWith = (code: string): Transport => async () => { throw Object.assign(new Error(code), { code }); };
+    const kind = (p: Promise<unknown>) => p.then(() => 'ok', (e: HttpRequestError) => e.kind);
+    expect(await kind(createSafeHttp({ transport: failWith('ENOTFOUND') }).stream('https://gone.example/', '*/*'))).toBe('dns');
+    expect(await kind(createSafeHttp({ transport: failWith('ECONNREFUSED') }).stream('https://down.example/', '*/*'))).toBe('connection');
+    const hang: Transport = (_, { signal }) => new Promise((_r, reject) => signal.addEventListener('abort', () => reject(signal.reason)));
+    expect(await kind(createSafeHttp({ transport: hang, timeoutMs: 20 }).stream('https://slow.example/', '*/*'))).toBe('timeout');
+    const loop: Transport = async () => reply(302, '', { location: '/again' });
+    expect(await kind(createSafeHttp({ transport: loop }).stream('https://loop.example/', '*/*'))).toBe('redirect');
+    const broken: Transport = async () => reply(301, '', { location: 'http://[bad' });
+    expect(await kind(createSafeHttp({ transport: broken }).stream('https://broken.example/', '*/*'))).toBe('redirect');
+  });
+
+  it('sends HEAD when asked and still validates every redirect hop', async () => {
+    const seen: string[] = [];
+    const transport: Transport = async (url, { method }) => {
+      seen.push(`${method} ${url.hostname}`);
+      return url.hostname === 'public.example.com' ? reply(302, '', { location: 'http://10.0.0.8/x.jpg' }) : reply(200);
+    };
+    await expect(createSafeHttp({ transport }).stream('https://public.example.com/x.jpg', 'image/*', { method: 'HEAD' }))
+      .rejects.toBeInstanceOf(BlockedDestinationError);
+    expect(seen).toEqual(['HEAD public.example.com']);
+  });
+
   it('parses Retry-After seconds and dates', () => {
     expect(parseRetryAfter('5')).toBe(5000);
     expect(parseRetryAfter('Wed, 21 Oct 2015 07:28:10 GMT', Date.parse('Wed, 21 Oct 2015 07:28:00 GMT'))).toBe(10_000);
@@ -132,5 +156,15 @@ describe('createSafeHttp with the real network transport', () => {
     const { fetch } = createSafeHttp({ allowPrivateNetwork: true });
     expect((await fetch(`http://127.0.0.1:${port}/`)).body).toBe('hello');
     expect(methods).toEqual(['GET']);
+  });
+
+  it('performs HEAD requests without a body', async () => {
+    const { stream } = createSafeHttp({ allowPrivateNetwork: true });
+    const res = await stream(`http://127.0.0.1:${port}/`, '*/*', { method: 'HEAD' });
+    const chunks: Uint8Array[] = [];
+    for await (const c of res.body) chunks.push(c);
+    expect(res.status).toBe(200);
+    expect(chunks).toEqual([]);
+    expect(methods.at(-1)).toBe('HEAD');
   });
 });

@@ -3,6 +3,7 @@ import { realpathSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 import { runAudit, type AuditOptions, type AuditProgress } from './core/audit.js';
+import { InvalidAllowedDomainError } from './core/health.js';
 import type { Inventory } from './core/types.js';
 import { InvalidSiteUrlError } from './core/url.js';
 import { writeJsonReport } from './report/json.js';
@@ -19,6 +20,12 @@ and writes an inventory.json file. Read-only: no content is modified or deleted.
 Options:
   -o, --output <dir>          Output directory (default: ./reports)
       --duplicates            Download and hash images to detect duplicates (slower)
+      --health                Check every image URL: missing (404/410), inaccessible (403, 5xx...),
+                              unreachable, timeout, unexpected content. Uses HEAD unless
+                              --duplicates already downloads the files
+      --allowed-domains <host>
+                              Expected image host besides the site itself (repeatable).
+                              Exact host, or *.example.com for its subdomains. Requires --health
       --allow-private-network Allow loopback/private/link-local targets (local testing only)
   -h, --help                  Show this help`;
 
@@ -39,6 +46,8 @@ export async function main(argv: string[], io: CliIo = consoleIo, auditOptions: 
         output: { type: 'string', short: 'o', default: './reports' },
         'allow-private-network': { type: 'boolean', default: false },
         duplicates: { type: 'boolean', default: false },
+        health: { type: 'boolean', default: false },
+        'allowed-domains': { type: 'string', multiple: true, default: [] },
         help: { type: 'boolean', short: 'h', default: false },
       },
     });
@@ -57,11 +66,17 @@ export async function main(argv: string[], io: CliIo = consoleIo, auditOptions: 
     io.stderr(`${command && command !== 'audit' ? `Error: unknown command "${command}"\n\n` : ''}${USAGE}`);
     return EXIT_USAGE;
   }
+  if (values['allowed-domains'].length > 0 && !values.health) {
+    io.stderr(`Error: --allowed-domains requires --health\n\n${USAGE}`);
+    return EXIT_USAGE;
+  }
 
   try {
     const inventory = await runAudit(siteUrl, {
       allowPrivateNetwork: values['allow-private-network'],
       duplicates: values.duplicates,
+      health: values.health,
+      allowedDomains: values['allowed-domains'],
       onProgress: (e) => {
         const line = formatProgress(e);
         if (line) io.stderr(line);
@@ -80,6 +95,7 @@ export async function main(argv: string[], io: CliIo = consoleIo, auditOptions: 
         `  Unique image URLs: ${stats.uniqueImageUrls}`,
         `  Domains:           ${inventory.domains.map((d) => `${d.hostname} (${d.uniqueImageUrls})`).join(', ') || 'none'}`,
         ...formatDuplicateSummary(inventory),
+        ...formatHealthSummary(inventory),
         ...inventory.warnings.map((w) => `  Warning: ${w}`),
         `Inventory written to ${file}`,
       ].join('\n'),
@@ -87,7 +103,7 @@ export async function main(argv: string[], io: CliIo = consoleIo, auditOptions: 
     return EXIT_OK;
   } catch (err) {
     io.stderr(`Error: ${(err as Error).message}`);
-    return err instanceof InvalidSiteUrlError ? EXIT_USAGE : EXIT_FAILURE;
+    return err instanceof InvalidSiteUrlError || err instanceof InvalidAllowedDomainError ? EXIT_USAGE : EXIT_FAILURE;
   }
 }
 
@@ -100,6 +116,19 @@ function formatDuplicateSummary({ duplicates: d }: Inventory): string[] {
     `  Theoretical duplicate bytes: ${d.estimate.theoreticalDuplicateBytes} (estimate, not guaranteed recoverable; verify manually)`,
     `  Filename candidates: ${d.filenameCandidates.length} group(s) (for review, not confirmed)`,
     `  Responsive families: ${d.responsiveFamilies.length}`,
+  ];
+}
+
+function formatHealthSummary({ mediaHealth: h }: Inventory): string[] {
+  if (!h) return [];
+  const problems = Object.entries(h.summary.byStatus)
+    .filter(([status, n]) => status !== 'healthy' && n > 0)
+    .map(([status, n]) => `${n} ${status}`);
+  const external = h.domains.filter((d) => d.classification === 'external');
+  return [
+    `  Media health:      ${h.summary.healthy}/${h.summary.imageUrls} healthy${problems.length ? ` (${problems.join(', ')})` : ''}`,
+    `  Affected content:  ${h.summary.affectedPosts} post(s), ${h.summary.affectedPages} page(s) reference images that are not healthy`,
+    `  External image domains: ${external.map((d) => `${d.hostname} (${d.imageUrls})`).join(', ') || 'none'} (dependencies to review, not necessarily problems)`,
   ];
 }
 

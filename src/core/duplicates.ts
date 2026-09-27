@@ -53,8 +53,8 @@ export function detectDuplicates(inventory: Inventory, inspections: ImageInspect
       url: image.url,
       filename: image.filename,
       hostname: image.hostname,
-      sha256: i?.ok ? i.sha256 : null,
-      bytes: i?.ok ? i.bytes : null,
+      sha256: i?.sha256 ?? null,
+      bytes: i?.sha256 ? (i.bytes ?? null) : null,
       references: image.references,
     };
   };
@@ -64,17 +64,17 @@ export function detectDuplicates(inventory: Inventory, inspections: ImageInspect
   const exactDuplicates = findExactDuplicates(inventory.images, observe);
   const filenameCandidates = findFilenameCandidates(parsed.filter((p) => !variantUrls.has(p.image.url)), observe);
 
-  const ok = inspections.filter((i) => i.ok);
-  const failed = inspections.filter((i) => !i.ok);
+  const ok = inspections.filter((i) => i.sha256);
+  const failed = inspections.filter((i) => !i.sha256);
   return {
     inspection: {
       attempted: inspections.length,
       inspected: ok.length,
       failed: failed.length,
-      bytesDownloaded: ok.reduce((n, i) => n + i.bytes, 0),
+      bytesDownloaded: ok.reduce((n, i) => n + (i.bytes ?? 0), 0),
     },
     failures: failed
-      .map((f) => ({ url: f.url, error: f.error, ...(f.httpStatus ? { httpStatus: f.httpStatus } : {}) }))
+      .map((f) => ({ url: f.url, error: f.error ?? f.status, ...(f.httpStatus ? { httpStatus: f.httpStatus } : {}) }))
       .sort((a, b) => cmp(a.url, b.url)),
     exactDuplicates,
     filenameCandidates,
@@ -148,7 +148,7 @@ function findResponsiveFamilies(parsed: Parsed[], observe: (i: ImageRecord) => O
   const variantUrls = new Set<string>();
   for (const [key, members] of candidates) {
     const original = byPath.get(key) ?? null;
-    const viaSrcset = members.length > 1 && members.some((m) => m.p.image.sources.includes('srcset'));
+    const viaSrcset = members.length > 1 && members.some((m) => m.p.image.sources.some((s) => s === 'srcset' || s === 'data-srcset'));
     // Dimensions in a filename alone are not evidence: require the original or srcset siblings.
     if (!original && !viaSrcset) continue;
     const first = members[0]!.p;
