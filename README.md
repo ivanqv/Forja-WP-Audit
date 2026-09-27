@@ -39,7 +39,7 @@ For example:
 
 Available with `--duplicates`: SHA-256 hashing confirms files that are exactly identical, and filename analysis flags suspected repeated uploads for review. The two are reported separately. WordPress-generated responsive sizes are recognized so they are not mistaken for duplicates.
 
-Results are grouped with file sizes, hashes, original URLs and references to the pages where each image appears. Image previews will come with the HTML report.
+Results are grouped with file sizes, hashes, original URLs and references to the pages where each image appears. With `--html`, the report shows duplicate groups with image previews.
 
 ### 2. External Domain Detection
 
@@ -76,8 +76,10 @@ Generate a self-contained HTML report containing:
 - Duplicate image groups with visual previews.
 - External domain dependencies.
 - Broken images.
-- File sizes and estimated recoverable storage.
+- File sizes and a theoretical duplicate-size estimate (never presented as guaranteed savings).
 - References to affected pages.
+
+Available with `--html`: see [HTML report](#html-report---html).
 
 Export structured JSON for additional processing or integration with other tools.
 
@@ -85,7 +87,7 @@ Export structured JSON for additional processing or integration with other tools
 
 ## Installation
 
-**Status: early development (Sprint 03 — media health and external dependencies).** Not yet published to npm; run it from source.
+**Status: early development (Sprint 04 — visual HTML report).** Not yet published to npm; run it from source.
 
 Requirements: Node.js 22+ and pnpm.
 
@@ -98,15 +100,16 @@ pnpm install
 ## Usage
 
 ```bash
-pnpm dev audit <site-url> [--duplicates] [--health] [--allowed-domains <host>]... [--output <dir>]
+pnpm dev audit <site-url> [--duplicates] [--health] [--allowed-domains <host>]... [--html] [--output <dir>]
 ```
 
 | Option | Description |
 |---|---|
-| `-o, --output <dir>` | Directory for `inventory.json` (default: `./reports`). Created if missing. |
+| `-o, --output <dir>` | Directory for `inventory.json` and `report.html` (default: `./reports`). Created if missing. |
 | `--duplicates` | Download every discovered image once, hash it and detect duplicates. Slower; off by default. |
 | `--health` | Check every image URL and report missing, inaccessible, unreachable and other failures, plus image domains. Uses HEAD requests (see below). |
 | `--allowed-domains <host>` | Image host you expect besides the site itself, e.g. a CDN. Repeatable. Exact host, or `*.example.com` for its subdomains. Requires `--health`. |
+| `--html` | Also write `report.html`, a standalone visual report generated from the inventory. |
 | `--allow-private-network` | Allow loopback/private/link-local targets. Only for local testing. |
 | `-h, --help` | Show help. |
 
@@ -184,7 +187,7 @@ Other scripts: `pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm build`.
 4. Resolves relative URLs, normalizes them and deduplicates them. Each srcset variant is kept as its own URL.
 5. With `--duplicates`: downloads each unique image URL, computes its SHA-256 and classifies duplicates (see below).
 6. With `--health`: checks each unique image URL and classifies image hosts (see below). Combined with `--duplicates`, the same download serves both: no URL is requested twice.
-7. Writes `inventory.json`.
+7. Writes `inventory.json`, and with `--html` also `report.html`, rendered from the same inventory without any further network request.
 
 ### Output: `inventory.json`
 
@@ -326,6 +329,32 @@ Present only with `--health`. Excerpt (full example in [`examples/inventory.exam
 
 Without `--health` there is no `mediaHealth` key. `schemaVersion` stays `1`: the section and the two new `sources` values are additive.
 
+### HTML report (`--html`)
+
+```bash
+pnpm dev audit https://example.com --health --duplicates --html --output ./reports
+```
+
+Writes `reports/inventory.json` as usual plus `reports/report.html`: a single file you can open directly in a browser (no server needed), share or print. It works with any combination of `--health` and `--duplicates`; sections without data are omitted. A synthetic example is in [`examples/report.example.html`](examples/report.example.html).
+
+Sections: overview metrics, media health (confirmed missing images shown apart from inaccessible, unreachable and timed-out ones), external domains (external first; not necessarily errors), exact duplicates (separate files vs same-file aliases), possible duplicate uploads (filename pattern, manual review), WordPress responsive families (never counted as duplicates) and the full image inventory with the posts/pages using each image. Each list has a text filter; navigation uses plain anchors.
+
+**Screenshots** (synthetic example data; previews served locally for the capture):
+
+| Overview | Media health |
+|---|---|
+| ![Overview](docs/screenshots/report-overview.png) | ![Media health](docs/screenshots/report-health.png) |
+| **Exact duplicates** | **Offline: previews replaced by placeholders** |
+| ![Exact duplicates](docs/screenshots/report-duplicates.png) | ![Offline](docs/screenshots/report-offline.png) |
+
+Mobile: [docs/screenshots/report-mobile.png](docs/screenshots/report-mobile.png). _Demo video: placeholder._
+
+**Offline behaviour.** The layout, styles, script and all data are inside the file: no web fonts, CSS or JavaScript are loaded from anywhere. The report is fully usable offline.
+
+**Thumbnails.** Duplicate groups and responsive families show small previews loaded directly from the image URLs when the report is opened (`loading="lazy"`, `referrerpolicy="no-referrer"`, at most 60 per report). No image bytes are downloaded or embedded while generating the report. Previews therefore depend on the audited website being online and allowing them; a preview that cannot load is replaced by a "No preview" placeholder without affecting the rest of the report. Opening the report makes your browser request those images from the audited site.
+
+**Security.** All values from the audited site (titles, URLs, filenames, hostnames, error messages, allowed domains) are treated as untrusted and HTML-escaped. Only absolute `http:`/`https:` URLs become links or image sources; anything else (`javascript:`, `data:`…) is shown as plain text. External links use `target="_blank" rel="noopener noreferrer"`. Post/page HTML is never included. A restrictive Content Security Policy (`default-src 'none'`; the report's own style and script are allowed by SHA-256 hash; images only over http/https) blocks any injected script, inline handler or style, even if escaping were bypassed.
+
 ### Network and security
 
 - Only GET and HEAD requests are made. Credentials in URLs are rejected. HEAD and GET-fallback requests go through the same protected client as downloads.
@@ -346,6 +375,7 @@ Without `--health` there is no `mediaHealth` key. `schemaVersion` stays `1`: the
 - Alias detection is heuristic (same path or origin host embedded in the path). CDNs that rewrite paths differently count as separate files.
 - Health checks trust the HTTP status and `Content-Type`. The image bytes are not decoded, so a corrupt file served as `image/jpeg` is reported healthy.
 - A health check reflects one moment from one network location. `inaccessible` and `timeout` can be transient or specific to the auditing machine (geo-blocking, WAF).
+- The HTML report's thumbnails load from the audited site when the report is opened and disappear if it is offline or blocks hotlinking. Media health problems and the image inventory show no previews. Very large inventories produce a large HTML file; filters are plain text matches.
 - Only the `www.` twin of the site host is internal by default. Other hosts you own (a CDN subdomain, an old domain you still control) must be passed with `--allowed-domains`.
 
 ## How It Works
@@ -421,7 +451,7 @@ Learn more:
 - [x] SHA-256 duplicate detection.
 - [x] External domain analysis.
 - [x] Broken image detection.
-- [ ] HTML and JSON reports.
+- [x] HTML and JSON reports.
 - [x] Automated tests.
 
 ### Future Improvements

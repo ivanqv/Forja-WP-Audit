@@ -1,5 +1,5 @@
 import { createServer, type Server } from 'node:http';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -66,6 +66,8 @@ describe('cli', () => {
     // Backward compatibility: no image downloads and no duplicates section without --duplicates.
     expect(inv).not.toHaveProperty('duplicates');
     expect(Object.keys(inv)).toEqual(['schemaVersion', 'siteUrl', 'auditedAt', 'stats', 'images', 'domains', 'warnings']);
+    expect(await readdir(outDir)).toEqual(['inventory.json']);
+    expect(c.out.join('\n')).not.toContain('HTML report');
   });
 
   it('detects duplicates with --duplicates', async () => {
@@ -97,6 +99,26 @@ describe('cli', () => {
     expect(inv).not.toHaveProperty('duplicates');
     expect(inv.mediaHealth!.allowedDomains).toEqual(['cdn.example.com']);
     expect(inv.mediaHealth!.domains).toMatchObject([{ hostname: '127.0.0.1', classification: 'internal', imageUrls: 3, affectedPosts: 1, affectedPages: 1 }]);
+  });
+
+  it('also writes report.html with --html, leaving inventory.json unchanged', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'forja-wp-audit-html-'));
+    try {
+      for (const flags of [[], ['--health'], ['--duplicates'], ['--health', '--duplicates']]) {
+        const c = capture();
+        expect(await main(['audit', siteUrl, ...flags, '--html', '-o', dir, '--allow-private-network'], c.io)).toBe(EXIT_OK);
+        expect(c.out.join('\n')).toContain(`HTML report written to ${join(dir, 'report.html')}`);
+        expect((await readdir(dir)).sort()).toEqual(['inventory.json', 'report.html']);
+        const inv = JSON.parse(await readFile(join(dir, 'inventory.json'), 'utf8')) as Inventory;
+        expect(Object.keys(inv).includes('mediaHealth')).toBe(flags.includes('--health'));
+        const html = await readFile(join(dir, 'report.html'), 'utf8');
+        expect(html).toContain('<h1>Media audit · 127.0.0.1</h1>');
+        expect(html.includes('id="health"')).toBe(flags.includes('--health'));
+        expect(html.includes('id="duplicates"')).toBe(flags.includes('--duplicates'));
+      }
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 
   it('blocks loopback targets by default', async () => {
